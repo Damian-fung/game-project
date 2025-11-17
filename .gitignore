@@ -1,0 +1,9 @@
+# 忽略儲存的 episode 記憶檔案
+snake_memories/
+*.pkl
+# 忽略 pycache
+__pycache__/
+*.pyc
+# 其他常見忽略
+*.log
+*.tmp
