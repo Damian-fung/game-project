@@ -29,10 +29,17 @@ python -m pip install -r requirements.txt
 
 Run
 ---
-From the `game` folder:
 
+Usage
+-----
+To run the basic snake game (with visible window):
 ```bash
 python game.py
+```
+
+To run AI training (no game window, only logs):
+```bash
+RUN_TRAIN=1 python game.py
 ```
 
 Notes & Troubleshooting
