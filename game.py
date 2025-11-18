@@ -1,4 +1,3 @@
-
 import pygame
 import numpy as np
 import random
@@ -881,6 +880,23 @@ class Game:
         self.walls = []
         self.lights = []
         self.init_3d_environment()
+        
+        # 學習曲線數據
+        self.learning_data = {
+            "snake1_scores": deque(maxlen=100),  # 保存最近100回合的得分
+            "snake2_scores": deque(maxlen=100),
+            "snake1_epsilons": deque(maxlen=100),  # 保存最近100回合的探索率
+            "snake2_epsilons": deque(maxlen=100),
+            "episodes": deque(maxlen=100)  # 保存最近100回合的編號
+        }
+        
+        # 初始化一些數據，確保圖表有內容顯示
+        for i in range(10):
+            self.learning_data["snake1_scores"].append(0)
+            self.learning_data["snake2_scores"].append(0)
+            self.learning_data["snake1_epsilons"].append(1.0)
+            self.learning_data["snake2_epsilons"].append(1.0)
+            self.learning_data["episodes"].append(i)
 
     def init_3d_environment(self):
         # 初始化3D環境 - 地板瓷磚
@@ -1216,6 +1232,13 @@ class Game:
         """結束當前回合並進行訓練"""
         print(f"回合 {self.game_stats['episode']} 完成 - {result}")
         
+        # 記錄學習數據
+        self.learning_data["snake1_scores"].append(self.snake1.score)
+        self.learning_data["snake2_scores"].append(self.snake2.score)
+        self.learning_data["snake1_epsilons"].append(self.ai1.epsilon)
+        self.learning_data["snake2_epsilons"].append(self.ai2.epsilon)
+        self.learning_data["episodes"].append(self.game_stats["episode"])
+        
         # 如果是訓練模式，進行學習
         if self.training_mode:
             self.ai1.replay()
@@ -1253,6 +1276,92 @@ class Game:
         self.ai1.save_model(os.path.join(self.model_dir, "snake1_model.pth"))
         self.ai2.save_model(os.path.join(self.model_dir, "snake2_model.pth"))
         print("AI模型已保存")
+
+    def draw_learning_graph(self, surface, x, y, width, height):
+        """繪製學習曲線圖"""
+        if len(self.learning_data["episodes"]) < 2:
+            return
+            
+        # 繪製圖表背景
+        graph_bg = pygame.Surface((width, height), pygame.SRCALPHA)
+        graph_bg.fill((30, 35, 50, 200))
+        surface.blit(graph_bg, (x, y))
+        pygame.draw.rect(surface, UI_BORDER, (x, y, width, height), 2, border_radius=5)
+        
+        # 圖表標題
+        title_text = self.small_font.render("學習曲線 (最近100回合)", True, TEXT_COLOR)
+        surface.blit(title_text, (x + width//2 - title_text.get_width()//2, y + 5))
+        
+        # 計算數據範圍
+        episodes = list(self.learning_data["episodes"])
+        scores1 = list(self.learning_data["snake1_scores"])
+        scores2 = list(self.learning_data["snake2_scores"])
+        
+        if not episodes or not scores1 or not scores2:
+            return
+            
+        max_score = max(max(scores1), max(scores2))
+        min_score = min(min(scores1), min(scores2))
+        
+        # 確保有足夠的範圍
+        score_range = max(max_score - min_score, 1)
+        
+        # 繪製網格
+        grid_color = (60, 70, 100)
+        for i in range(1, 5):
+            grid_y = y + height - 20 - (i * (height - 40) // 5)
+            pygame.draw.line(surface, grid_color, (x + 10, grid_y), (x + width - 10, grid_y), 1)
+            
+            # 網格標籤
+            label_value = min_score + (i * score_range // 5)
+            label_text = self.small_font.render(str(label_value), True, TEXT_COLOR)
+            surface.blit(label_text, (x + 5, grid_y - 8))
+        
+        # 繪製折線
+        graph_width = width - 40
+        graph_height = height - 40
+        
+        # 蛇1的學習曲線（藍色）
+        if len(episodes) > 1:
+            points1 = []
+            for i, episode in enumerate(episodes):
+                if i >= len(scores1):
+                    break
+                point_x = x + 20 + (i * graph_width // (len(episodes) - 1))
+                point_y = y + height - 20 - ((scores1[i] - min_score) * graph_height // score_range)
+                points1.append((point_x, point_y))
+            
+            if len(points1) > 1:
+                pygame.draw.lines(surface, (50, 150, 255), False, points1, 2)
+                # 繪製數據點
+                for point in points1:
+                    pygame.draw.circle(surface, (50, 150, 255), point, 3)
+        
+        # 蛇2的學習曲線（紅色）
+        if len(episodes) > 1:
+            points2 = []
+            for i, episode in enumerate(episodes):
+                if i >= len(scores2):
+                    break
+                point_x = x + 20 + (i * graph_width // (len(episodes) - 1))
+                point_y = y + height - 20 - ((scores2[i] - min_score) * graph_height // score_range)
+                points2.append((point_x, point_y))
+            
+            if len(points2) > 1:
+                pygame.draw.lines(surface, (255, 50, 50), False, points2, 2)
+                # 繪製數據點
+                for point in points2:
+                    pygame.draw.circle(surface, (255, 50, 50), point, 3)
+        
+        # 圖例
+        legend_y = y + height - 15
+        pygame.draw.line(surface, (50, 150, 255), (x + 10, legend_y), (x + 30, legend_y), 2)
+        legend1_text = self.small_font.render("AI蛇1", True, (50, 150, 255))
+        surface.blit(legend1_text, (x + 35, legend_y - 8))
+        
+        pygame.draw.line(surface, (255, 50, 50), (x + 90, legend_y), (x + 110, legend_y), 2)
+        legend2_text = self.small_font.render("AI蛇2", True, (255, 50, 50))
+        surface.blit(legend2_text, (x + 115, legend_y - 8))
 
     def draw(self):
         # 繪製背景
@@ -1391,7 +1500,10 @@ class Game:
         button_text = self.small_font.render("保存模型", True, TEXT_COLOR)
         screen.blit(button_text, (ui_panel_x + 20 + (button_width - button_text.get_width()) // 2, button_y + 127))
 
-        # 控制提示
+        # 學習曲線圖 - 放在控制面板下方
+        self.draw_learning_graph(screen, ui_panel_x + 10, 520, UI_PANEL_WIDTH - 20, 150)
+
+        # 控制提示 - 放在學習曲線圖下方
         controls = [
             "ESC: 退出遊戲",
             "空格: 暫停/繼續",
@@ -1403,14 +1515,14 @@ class Game:
 
         for i, control in enumerate(controls):
             control_text = self.small_font.render(control, True, TEXT_COLOR)
-            screen.blit(control_text, (ui_panel_x + 20, 520 + i * 20))
+            screen.blit(control_text, (ui_panel_x + 20, 680 + i * 20))
 
-        # 勝利統計
+        # 勝利統計 - 放在控制提示上方
         wins_text = self.small_font.render(
             f"勝利: AI1 {self.game_stats['wins'][0]} - AI2 {self.game_stats['wins'][1]}",
             True, TEXT_COLOR
         )
-        screen.blit(wins_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - wins_text.get_width() // 2, 470))
+        screen.blit(wins_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - wins_text.get_width() // 2, 670))
 
     def reset_episode(self):
         # 重置蛇（保留初始三格設計）
