@@ -56,6 +56,10 @@ FLOOR_COLOR = (30, 40, 60)
 WALL_COLOR = (50, 60, 90)
 LIGHT_COLOR = (255, 255, 220, 50)
 
+# 障礙物顏色
+OBSTACLE_COLOR = (120, 80, 40)
+OBSTACLE_HIGHLIGHT = (150, 110, 70)
+
 # 深度學習模型定義
 class DQN(nn.Module):
     def __init__(self, input_size, output_size):
@@ -105,7 +109,7 @@ class DQNAgent:
             self.target_model.load_state_dict(self.model.state_dict())
             print(f"載入已有模型: {model_path}")
         
-    def get_state(self, snake, food, other_snake):
+    def get_state(self, snake, foods, other_snake, obstacles):
         """獲取遊戲狀態作為神經網絡輸入"""
         head = snake.body[0]
         
@@ -115,11 +119,19 @@ class DQNAgent:
         dir_up = 1 if snake.direction == UP else 0
         dir_down = 1 if snake.direction == DOWN else 0
         
-        # 食物相對位置
-        food_left = 1 if food.position[0] < head[0] else 0
-        food_right = 1 if food.position[0] > head[0] else 0
-        food_up = 1 if food.position[1] < head[1] else 0
-        food_down = 1 if food.position[1] > head[1] else 0
+        # 最近食物的相對位置
+        closest_food = None
+        min_distance = float('inf')
+        for food in foods:
+            dist = abs(food.position[0] - head[0]) + abs(food.position[1] - head[1])
+            if dist < min_distance:
+                min_distance = dist
+                closest_food = food
+        
+        food_left = 1 if closest_food and closest_food.position[0] < head[0] else 0
+        food_right = 1 if closest_food and closest_food.position[0] > head[0] else 0
+        food_up = 1 if closest_food and closest_food.position[1] < head[1] else 0
+        food_down = 1 if closest_food and closest_food.position[1] > head[1] else 0
         
         # 危險檢測 (前、左、右三個方向)
         danger_straight = 0
@@ -127,8 +139,7 @@ class DQNAgent:
         danger_right = 0
         
         # 計算前方位置
-        front = ((head[0] + snake.direction[0]) % GRID_WIDTH, 
-                (head[1] + snake.direction[1]) % GRID_HEIGHT)
+        front = ((head[0] + snake.direction[0]), (head[1] + snake.direction[1]))
         
         # 計算左方位置 (相對當前方向的左轉)
         if snake.direction == UP:
@@ -140,8 +151,7 @@ class DQNAgent:
         else:  # RIGHT
             left_dir = UP
             
-        left = ((head[0] + left_dir[0]) % GRID_WIDTH,
-               (head[1] + left_dir[1]) % GRID_HEIGHT)
+        left = ((head[0] + left_dir[0]), (head[1] + left_dir[1]))
         
         # 計算右方位置 (相對當前方向的右轉)
         if snake.direction == UP:
@@ -153,13 +163,12 @@ class DQNAgent:
         else:  # RIGHT
             right_dir = DOWN
             
-        right = ((head[0] + right_dir[0]) % GRID_WIDTH,
-                (head[1] + right_dir[1]) % GRID_HEIGHT)
+        right = ((head[0] + right_dir[0]), (head[1] + right_dir[1]))
         
         # 檢查危險
-        danger_straight = self._is_dangerous(front, snake, other_snake)
-        danger_left = self._is_dangerous(left, snake, other_snake)
-        danger_right = self._is_dangerous(right, snake, other_snake)
+        danger_straight = self._is_dangerous(front, snake, other_snake, obstacles)
+        danger_left = self._is_dangerous(left, snake, other_snake, obstacles)
+        danger_right = self._is_dangerous(right, snake, other_snake, obstacles)
         
         # 組合成狀態向量
         state = [
@@ -173,14 +182,24 @@ class DQNAgent:
         
         return np.array(state, dtype=np.float32)
     
-    def _is_dangerous(self, pos, snake, other_snake):
-        """檢查位置是否危險（撞牆、自己、對方）"""
+    def _is_dangerous(self, pos, snake, other_snake, obstacles):
+        """檢查位置是否危險（撞牆、自己、對方、障礙物）"""
+        # 檢查是否超出邊界
+        if pos[0] < 0 or pos[0] >= GRID_WIDTH or pos[1] < 0 or pos[1] >= GRID_HEIGHT:
+            return 1
+            
         # 檢查是否撞到自己
         if pos in snake.body[1:]:
             return 1
+            
         # 檢查是否撞到對方
         if pos in other_snake.body:
             return 1
+            
+        # 檢查是否撞到障礙物
+        if pos in obstacles:
+            return 1
+            
         return 0
     
     def get_action(self, state):
@@ -246,7 +265,7 @@ class Snake:
         self.total_steps = 0
         self.last_action = None
 
-    def move(self, action=None):
+    def move(self, action=None, obstacles=None):
         if not self.alive:
             return
 
@@ -283,8 +302,8 @@ class Snake:
     def _apply_move(self):
         head = self.body[0]
         new_pos = (
-            (head[0] + self.direction[0]) % GRID_WIDTH,
-            (head[1] + self.direction[1]) % GRID_HEIGHT
+            head[0] + self.direction[0],
+            head[1] + self.direction[1]
         )
 
         # 移動身體
@@ -296,9 +315,27 @@ class Snake:
         self.body.append(self.body[-1])
         self.score += 1
 
-    def check_self_collision(self):
+    def check_collision(self, other_snake, obstacles):
+        """檢查碰撞（牆壁、自己、對方、障礙物）"""
         head = self.body[0]
-        return head in self.body[1:]
+        
+        # 檢查是否撞牆
+        if head[0] < 0 or head[0] >= GRID_WIDTH or head[1] < 0 or head[1] >= GRID_HEIGHT:
+            return True
+            
+        # 檢查是否撞到自己
+        if head in self.body[1:]:
+            return True
+            
+        # 檢查是否撞到對方
+        if head in other_snake.body:
+            return True
+            
+        # 檢查是否撞到障礙物
+        if head in obstacles:
+            return True
+            
+        return False
 
     def draw(self, surface):
         for i, segment in enumerate(self.body):
@@ -572,7 +609,38 @@ class Food:
         self.animation_offset = random.random() * 2 * math.pi
         self.rotation = 0
 
-    def generate_position(self):
+    def generate_position(self, snakes=None, obstacles=None, other_foods=None):
+        attempts = 0
+        while attempts < 100:
+            pos = (
+                random.randint(0, GRID_WIDTH - 1),
+                random.randint(0, GRID_HEIGHT - 1)
+            )
+            
+            # 檢查位置是否被佔用
+            valid = True
+            
+            # 檢查蛇
+            if snakes:
+                for snake in snakes:
+                    if pos in snake.body:
+                        valid = False
+                        break
+            
+            # 檢查障礙物
+            if obstacles and pos in obstacles:
+                valid = False
+                
+            # 檢查其他食物
+            if other_foods and pos in [f.position for f in other_foods]:
+                valid = False
+                
+            if valid:
+                return pos
+                
+            attempts += 1
+            
+        # 如果找不到合適位置，返回隨機位置
         return (
             random.randint(0, GRID_WIDTH - 1),
             random.randint(0, GRID_HEIGHT - 1)
@@ -714,6 +782,107 @@ class Food:
         surface.blit(s, (glow_center_x - glow_radius, glow_center_y - glow_radius))
 
 
+class Obstacle:
+    def __init__(self, x, y):
+        self.position = (x, y)
+        self.animation_offset = random.random() * 2 * math.pi
+
+    def draw(self, surface):
+        x, y = self.position
+        
+        if is_3d_mode:
+            self.draw_3d(surface, x, y)
+        else:
+            self.draw_2d(surface, x, y)
+    
+    def draw_2d(self, surface, x, y):
+        rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+        
+        # 繪製陰影
+        shadow_rect = pygame.Rect(x * CELL_SIZE + 2, y * CELL_SIZE + 2, CELL_SIZE, CELL_SIZE)
+        pygame.draw.rect(surface, (max(0, OBSTACLE_COLOR[0]-30), max(0, OBSTACLE_COLOR[1]-30), max(0, OBSTACLE_COLOR[2]-30)), shadow_rect, border_radius=3)
+        
+        # 繪製障礙物主體
+        pygame.draw.rect(surface, OBSTACLE_COLOR, rect, border_radius=3)
+        
+        # 繪製紋理
+        texture_rect = pygame.Rect(x * CELL_SIZE + 5, y * CELL_SIZE + 5, CELL_SIZE - 10, CELL_SIZE - 10)
+        pygame.draw.rect(surface, OBSTACLE_HIGHLIGHT, texture_rect, border_radius=2)
+        
+        # 繪製裂縫效果
+        for i in range(3):
+            crack_start = (x * CELL_SIZE + random.randint(5, CELL_SIZE-5), 
+                          y * CELL_SIZE + random.randint(5, CELL_SIZE-5))
+            crack_end = (x * CELL_SIZE + random.randint(5, CELL_SIZE-5), 
+                        y * CELL_SIZE + random.randint(5, CELL_SIZE-5))
+            pygame.draw.line(surface, (80, 50, 20), crack_start, crack_end, 1)
+    
+    def draw_3d(self, surface, x, y):
+        # 等角投影參數
+        iso_scale = 0.7
+        iso_x = (x - y) * (CELL_SIZE * iso_scale)
+        iso_y = (x + y) * (CELL_SIZE * iso_scale / 2)
+        
+        # 調整位置到屏幕中央
+        offset_x = GRID_WIDTH * CELL_SIZE * 0.3
+        offset_y = GRID_HEIGHT * CELL_SIZE * 0.1
+        iso_x += offset_x
+        iso_y += offset_y
+        
+        # 3D障礙物的高度
+        height = CELL_SIZE * 1.0
+        
+        # 計算3D障礙物的頂點
+        points_top = [
+            (iso_x, iso_y),  # 左上
+            (iso_x + CELL_SIZE * iso_scale, iso_y + CELL_SIZE * iso_scale / 2),  # 右上
+            (iso_x + CELL_SIZE * iso_scale, iso_y + CELL_SIZE * iso_scale / 2 + height),  # 右下
+            (iso_x, iso_y + height)  # 左下
+        ]
+        
+        # 繪製3D障礙物的頂面
+        pygame.draw.polygon(surface, OBSTACLE_COLOR, points_top)
+        
+        # 繪製側面
+        side_points = [
+            (iso_x + CELL_SIZE * iso_scale, iso_y + CELL_SIZE * iso_scale / 2),
+            (iso_x + CELL_SIZE * iso_scale, iso_y + CELL_SIZE * iso_scale / 2 + height),
+            (iso_x + CELL_SIZE * iso_scale * 1.2, iso_y + CELL_SIZE * iso_scale / 2 + height * 0.5),
+            (iso_x + CELL_SIZE * iso_scale * 1.2, iso_y + CELL_SIZE * iso_scale / 2 - height * 0.5)
+        ]
+        side_color = (
+            max(0, OBSTACLE_COLOR[0] - 30),
+            max(0, OBSTACLE_COLOR[1] - 30),
+            max(0, OBSTACLE_COLOR[2] - 30)
+        )
+        pygame.draw.polygon(surface, side_color, side_points)
+        
+        # 繪製前面
+        front_color = (
+            max(0, OBSTACLE_COLOR[0] - 15),
+            max(0, OBSTACLE_COLOR[1] - 15),
+            max(0, OBSTACLE_COLOR[2] - 15)
+        )
+        front_points = [
+            (iso_x, iso_y + height),
+            (iso_x + CELL_SIZE * iso_scale, iso_y + CELL_SIZE * iso_scale / 2 + height),
+            (iso_x + CELL_SIZE * iso_scale * 1.2, iso_y + CELL_SIZE * iso_scale / 2 + height * 0.5),
+            (iso_x + CELL_SIZE * iso_scale * 0.2, iso_y + height * 0.5)
+        ]
+        pygame.draw.polygon(surface, front_color, front_points)
+        
+        # 繪製裂縫紋理
+        for i in range(3):
+            crack_start_x = iso_x + random.randint(5, int(CELL_SIZE * iso_scale) - 5)
+            crack_start_y = iso_y + random.randint(5, int(CELL_SIZE * iso_scale / 2) - 5)
+            crack_end_x = iso_x + random.randint(5, int(CELL_SIZE * iso_scale) - 5)
+            crack_end_y = iso_y + random.randint(5, int(CELL_SIZE * iso_scale / 2) - 5)
+            
+            pygame.draw.line(surface, (80, 50, 20), 
+                           (crack_start_x, crack_start_y),
+                           (crack_end_x, crack_end_y), 2)
+
+
 class AttackEffect:
     """簡單的攻擊動畫效果 — 在格子上顯示短暫粒子/閃爍"""
     def __init__(self, pos, life_frames=10):
@@ -824,7 +993,12 @@ class Game:
         self.snake1.body = [(5,10),(4,10),(3,10)]
         self.snake2.body = [(GRID_WIDTH-6,10),(GRID_WIDTH-7,10),(GRID_WIDTH-8,10)]
 
-        self.food = Food()
+        # 創建兩個食物
+        self.foods = [Food(), Food()]
+        
+        # 創建障礙物
+        self.obstacles = self.create_obstacles()
+        
         self.running = True
         self.font = pygame.font.SysFont('simhei', 20)
         self.small_font = pygame.font.SysFont('simhei', 16)
@@ -880,6 +1054,34 @@ class Game:
         self.walls = []
         self.lights = []
         self.init_3d_environment()
+
+    def create_obstacles(self):
+        """創建障礙物"""
+        obstacles = []
+        
+        # 創建3-4個障礙物
+        obstacle_positions = [
+            # 中間障礙物
+            (GRID_WIDTH//2, GRID_HEIGHT//2),
+            (GRID_WIDTH//2 + 1, GRID_HEIGHT//2),
+            (GRID_WIDTH//2, GRID_HEIGHT//2 + 1),
+            (GRID_WIDTH//2 + 1, GRID_HEIGHT//2 + 1),
+            
+            # 左上角障礙物
+            (GRID_WIDTH//4, GRID_HEIGHT//4),
+            (GRID_WIDTH//4 + 1, GRID_HEIGHT//4),
+            (GRID_WIDTH//4, GRID_HEIGHT//4 + 1),
+            
+            # 右下角障礙物
+            (GRID_WIDTH*3//4, GRID_HEIGHT*3//4),
+            (GRID_WIDTH*3//4 - 1, GRID_HEIGHT*3//4),
+            (GRID_WIDTH*3//4, GRID_HEIGHT*3//4 - 1)
+        ]
+        
+        for pos in obstacle_positions:
+            obstacles.append(Obstacle(pos[0], pos[1]))
+            
+        return obstacles
 
     def init_3d_environment(self):
         # 初始化3D環境 - 地板瓷磚
@@ -1054,8 +1256,9 @@ class Game:
         reward += 0.01
         
         # 吃到食物的獎勵
-        if snake.body[0] == self.food.position:
-            reward += 10
+        for food in self.foods:
+            if snake.body[0] == food.position:
+                reward += 10
         
         # 攻擊成功的獎勵（讓對方縮短）
         head = snake.body[0]
@@ -1078,8 +1281,8 @@ class Game:
         prev_alive = (self.snake1.alive, self.snake2.alive)
         
         # 獲取當前狀態
-        state1 = self.ai1.get_state(self.snake1, self.food, self.snake2)
-        state2 = self.ai2.get_state(self.snake2, self.food, self.snake1)
+        state1 = self.ai1.get_state(self.snake1, self.foods, self.snake2, [obs.position for obs in self.obstacles])
+        state2 = self.ai2.get_state(self.snake2, self.foods, self.snake1, [obs.position for obs in self.obstacles])
         
         # AI選擇動作
         action1 = self.ai1.get_action(state1)
@@ -1089,36 +1292,35 @@ class Game:
         if self.snake1.alive:
             self.snake1.move(action1)
 
-            # 檢查自我碰撞
-            if self.snake1.check_self_collision():
+            # 檢查碰撞（牆壁、自己、對方、障礙物）
+            if self.snake1.check_collision(self.snake2, [obs.position for obs in self.obstacles]):
                 self.snake1.alive = False
 
         # 更新AI蛇2
         if self.snake2.alive:
             self.snake2.move(action2)
 
-            # 檢查自我碰撞
-            if self.snake2.check_self_collision():
+            # 檢查碰撞（牆壁、自己、對方、障礙物）
+            if self.snake2.check_collision(self.snake1, [obs.position for obs in self.obstacles]):
                 self.snake2.alive = False
 
         # 檢查吃食物
         for snake in [self.snake1, self.snake2]:
-            if snake.alive and snake.body[0] == self.food.position:
-                snake.grow()
-                # 重新產生食物（避免生成在任一蛇身上）
-                attempts = 0
-                while True:
-                    self.food = Food()
-                    if self.food.position not in (self.snake1.body + self.snake2.body):
-                        break
-                    attempts += 1
-                    if attempts > 200:
-                        break
-                self.game_stats["total_food"] += 1
+            if snake.alive:
+                for food in self.foods:
+                    if snake.body[0] == food.position:
+                        snake.grow()
+                        # 重新產生食物（避免生成在任一蛇身上或障礙物上）
+                        food.position = food.generate_position(
+                            [self.snake1, self.snake2], 
+                            [obs.position for obs in self.obstacles],
+                            [f for f in self.foods if f != food]
+                        )
+                        self.game_stats["total_food"] += 1
 
         # 獲取新狀態
-        new_state1 = self.ai1.get_state(self.snake1, self.food, self.snake2)
-        new_state2 = self.ai2.get_state(self.snake2, self.food, self.snake1)
+        new_state1 = self.ai1.get_state(self.snake1, self.foods, self.snake2, [obs.position for obs in self.obstacles])
+        new_state2 = self.ai2.get_state(self.snake2, self.foods, self.snake1, [obs.position for obs in self.obstacles])
         
         # 計算獎勵
         reward1 = self.calculate_reward(self.snake1, self.snake2, action1, state1, new_state1, not self.snake1.alive)
@@ -1268,7 +1470,13 @@ class Game:
                 pygame.draw.line(screen, GRID_COLOR, (0, y), (GRID_WIDTH * CELL_SIZE, y), 1)
 
         # 繪製遊戲元素
-        self.food.draw(screen)
+        for food in self.foods:
+            food.draw(screen)
+            
+        # 繪製障礙物
+        for obstacle in self.obstacles:
+            obstacle.draw(screen)
+            
         self.snake1.draw(screen)
         self.snake2.draw(screen)
 
@@ -1417,7 +1625,16 @@ class Game:
         self.snake2 = Snake((GRID_WIDTH - 6, 10), (50, 50, 200), "AI蛇2", 1)
         self.snake1.body = [(5,10),(4,10),(3,10)]
         self.snake2.body = [(GRID_WIDTH-6,10),(GRID_WIDTH-7,10),(GRID_WIDTH-8,10)]
-        self.food = Food()
+        
+        # 重置食物
+        self.foods = [Food(), Food()]
+        for food in self.foods:
+            food.position = food.generate_position(
+                [self.snake1, self.snake2], 
+                [obs.position for obs in self.obstacles],
+                [f for f in self.foods if f != food]
+            )
+            
         self.attack_effects.clear()
 
     # 添加缺失的 run 方法
