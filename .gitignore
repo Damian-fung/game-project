@@ -7,3 +7,6 @@ __pycache__/
 # 其他常見忽略
 *.log
 *.tmp
+git-rm-from-history
+training_log.csv
+*.pth
