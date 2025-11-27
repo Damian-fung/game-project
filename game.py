@@ -1168,6 +1168,8 @@ class Game:
         # AI選擇動作
         action1 = self.ai1.get_action(state1)
         action2 = self.ai2.get_action(state2)
+
+        # TODO calculate old distance to apple and enemy
         
         # 更新AI蛇1
         if self.snake1.alive:
@@ -1184,6 +1186,11 @@ class Game:
             # 檢查自我碰撞
             if self.snake2.check_self_collision():
                 self.snake2.alive = False
+        
+        # TODO calculate new distance to apple and enemy
+
+        # TODO calculate if getting closer or farther with food, adjust reward score
+        
 
         # 檢查吃食物
         for snake in [self.snake1, self.snake2]:
