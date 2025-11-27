@@ -1,5 +1,5 @@
-pygame
-PyOpenGL
-numpy
-torch
+pygame==2.6.1
+PyOpenGL==3.1.10
+numpy==2.3.5
+torch==2.9.1
 # tensorflow  # optional, very large
