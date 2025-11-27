@@ -99,6 +99,7 @@ class DQNAgent:
         self.epsilon_decay = 0.995
         self.update_target_every = 100
         self.steps = 0
+        self.last_loss = 0.0  # 記錄最近一次訓練損失
         
         if model_path and os.path.exists(model_path):
             self.model.load_state_dict(torch.load(model_path))
@@ -216,6 +217,9 @@ class DQNAgent:
         target_q_values = rewards + (self.gamma * next_q_values * ~dones)
         
         loss = F.mse_loss(current_q_values.squeeze(), target_q_values)
+        
+        # 記錄損失值
+        self.last_loss = loss.item()
         
         self.optimizer.zero_grad()
         loss.backward()
@@ -853,7 +857,10 @@ class Game:
             "episode": 0,
             "wins": [0, 0],  # [蛇1勝利次數, 蛇2勝利次數]
             "total_food": 0,
-            "training_episodes": 0
+            "training_episodes": 0,
+            "total_rewards": [0.0, 0.0],  # 每回合累積獎勵
+            "episode_steps": 0,  # 當前回合步數
+            "avg_rewards": [0.0, 0.0]  # 平均獎勵
         }
 
         # 攻擊動畫效果列表
@@ -887,6 +894,10 @@ class Game:
             "snake2_scores": deque(maxlen=100),
             "snake1_epsilons": deque(maxlen=100),  # 保存最近100回合的探索率
             "snake2_epsilons": deque(maxlen=100),
+            "snake1_losses": deque(maxlen=100),  # 保存最近100回合的損失
+            "snake2_losses": deque(maxlen=100),
+            "snake1_rewards": deque(maxlen=100),  # 保存最近100回合的獎勵
+            "snake2_rewards": deque(maxlen=100),
             "episodes": deque(maxlen=100)  # 保存最近100回合的編號
         }
         
@@ -896,7 +907,60 @@ class Game:
             self.learning_data["snake2_scores"].append(0)
             self.learning_data["snake1_epsilons"].append(1.0)
             self.learning_data["snake2_epsilons"].append(1.0)
+            self.learning_data["snake1_losses"].append(0)
+            self.learning_data["snake2_losses"].append(0)
+            self.learning_data["snake1_rewards"].append(0)
+            self.learning_data["snake2_rewards"].append(0)
             self.learning_data["episodes"].append(i)
+        
+        # CSV 訓練日誌
+        self.log_file = "training_log.csv"
+        self.init_training_log()
+
+    def init_training_log(self):
+        """初始化訓練日誌 CSV 文件"""
+        import csv
+        # 如果文件不存在，創建並寫入表頭
+        if not os.path.exists(self.log_file):
+            with open(self.log_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'episode', 'snake1_score', 'snake2_score', 
+                    'snake1_length', 'snake2_length',
+                    'snake1_epsilon', 'snake2_epsilon',
+                    'snake1_loss', 'snake2_loss',
+                    'snake1_reward', 'snake2_reward',
+                    'winner', 'steps', 'win_rate_snake1', 'win_rate_snake2'
+                ])
+    
+    def log_episode(self, winner):
+        """記錄回合數據到 CSV"""
+        import csv
+        
+        # 計算勝率
+        total_wins = sum(self.game_stats['wins'])
+        win_rate_1 = self.game_stats['wins'][0] / max(1, total_wins) * 100
+        win_rate_2 = self.game_stats['wins'][1] / max(1, total_wins) * 100
+        
+        with open(self.log_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                self.game_stats['episode'],
+                self.snake1.score,
+                self.snake2.score,
+                len(self.snake1.body),
+                len(self.snake2.body),
+                f"{self.ai1.epsilon:.4f}",
+                f"{self.ai2.epsilon:.4f}",
+                f"{self.ai1.last_loss:.4f}",
+                f"{self.ai2.last_loss:.4f}",
+                f"{self.game_stats['total_rewards'][0]:.2f}",
+                f"{self.game_stats['total_rewards'][1]:.2f}",
+                winner,
+                self.game_stats['episode_steps'],
+                f"{win_rate_1:.2f}",
+                f"{win_rate_2:.2f}"
+            ])
 
     def init_3d_environment(self):
         # 初始化3D環境 - 地板瓷磚
@@ -1091,6 +1155,9 @@ class Game:
         return reward
 
     def update(self):
+        # 增加步數
+        self.game_stats["episode_steps"] += 1
+        
         # 記住回合開始時誰還活著（用於計分判斷）
         prev_alive = (self.snake1.alive, self.snake2.alive)
         
@@ -1140,6 +1207,10 @@ class Game:
         # 計算獎勵
         reward1 = self.calculate_reward(self.snake1, self.snake2, action1, state1, new_state1, not self.snake1.alive)
         reward2 = self.calculate_reward(self.snake2, self.snake1, action2, state2, new_state2, not self.snake2.alive)
+        
+        # 累積獎勵
+        self.game_stats["total_rewards"][0] += reward1
+        self.game_stats["total_rewards"][1] += reward2
         
         # 記錄經驗（如果處於訓練模式）
         if self.training_mode:
@@ -1237,7 +1308,19 @@ class Game:
         self.learning_data["snake2_scores"].append(self.snake2.score)
         self.learning_data["snake1_epsilons"].append(self.ai1.epsilon)
         self.learning_data["snake2_epsilons"].append(self.ai2.epsilon)
+        self.learning_data["snake1_losses"].append(self.ai1.last_loss)
+        self.learning_data["snake2_losses"].append(self.ai2.last_loss)
+        self.learning_data["snake1_rewards"].append(self.game_stats["total_rewards"][0])
+        self.learning_data["snake2_rewards"].append(self.game_stats["total_rewards"][1])
         self.learning_data["episodes"].append(self.game_stats["episode"])
+        
+        # 計算平均獎勵
+        if self.game_stats["episode_steps"] > 0:
+            self.game_stats["avg_rewards"][0] = self.game_stats["total_rewards"][0] / self.game_stats["episode_steps"]
+            self.game_stats["avg_rewards"][1] = self.game_stats["total_rewards"][1] / self.game_stats["episode_steps"]
+        
+        # 記錄到 CSV
+        self.log_episode(result)
         
         # 如果是訓練模式，進行學習
         if self.training_mode:
@@ -1406,13 +1489,13 @@ class Game:
 
         # AI狀態面板
         for i, snake in enumerate([self.snake1, self.snake2]):
-            y_pos = 50 + i * 100
+            y_pos = 50 + i * 130
 
             # 繪製AI狀態背景
-            ai_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 90), pygame.SRCALPHA)
+            ai_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 120), pygame.SRCALPHA)
             ai_bg.fill((snake.color[0]//4, snake.color[1]//4, snake.color[2]//4, 150))
             screen.blit(ai_bg, (ui_panel_x + 10, y_pos))
-            pygame.draw.rect(screen, snake.color, (ui_panel_x + 10, y_pos, UI_PANEL_WIDTH - 20, 90), 2, border_radius=5)
+            pygame.draw.rect(screen, snake.color, (ui_panel_x + 10, y_pos, UI_PANEL_WIDTH - 20, 120), 2, border_radius=5)
 
             # AI標題
             ai_title = self.font.render(f"{snake.name}", True, snake.color)
@@ -1432,41 +1515,60 @@ class Game:
             
             # AI信息
             epsilon = self.ai1.epsilon if i == 0 else self.ai2.epsilon
+            loss = self.ai1.last_loss if i == 0 else self.ai2.last_loss
+            reward = self.game_stats["total_rewards"][i]
+            
             ai_info = self.small_font.render(f"探索率: {epsilon:.3f}", True, (200, 200, 100))
             screen.blit(ai_info, (ui_panel_x + 120, y_pos + 50))
+            
+            # 顯示損失和獎勵
+            loss_text = self.small_font.render(f"損失: {loss:.4f}", True, (255, 150, 150))
+            screen.blit(loss_text, (ui_panel_x + 20, y_pos + 70))
+            
+            reward_text = self.small_font.render(f"獎勵: {reward:.2f}", True, (150, 255, 150))
+            screen.blit(reward_text, (ui_panel_x + 120, y_pos + 70))
+            
+            # 平均獎勵
+            avg_reward = self.game_stats["avg_rewards"][i]
+            avg_text = self.small_font.render(f"平均: {avg_reward:.3f}", True, (150, 200, 255))
+            screen.blit(avg_text, (ui_panel_x + 20, y_pos + 92))
 
         # 中央信息面板
-        center_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 100), pygame.SRCALPHA)
+        center_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 120), pygame.SRCALPHA)
         center_bg.fill((40, 45, 60, 200))
-        screen.blit(center_bg, (ui_panel_x + 10, 250))
-        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x + 10, 250, UI_PANEL_WIDTH - 20, 100), 2, border_radius=5)
+        screen.blit(center_bg, (ui_panel_x + 10, 310))
+        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x + 10, 310, UI_PANEL_WIDTH - 20, 120), 2, border_radius=5)
 
         # 回合信息
         episode_text = self.font.render(f"回合: {self.game_stats['episode']}", True, TEXT_COLOR)
-        screen.blit(episode_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - episode_text.get_width() // 2, 260))
+        screen.blit(episode_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - episode_text.get_width() // 2, 320))
+        
+        # 步數信息
+        steps_text = self.small_font.render(f"步數: {self.game_stats['episode_steps']}", True, TEXT_COLOR)
+        screen.blit(steps_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - steps_text.get_width() // 2, 345))
         
         # 訓練信息
         train_status = "訓練中" if self.training_mode else "演示模式"
         train_color = (0, 255, 0) if self.training_mode else (255, 255, 0)
         train_text = self.font.render(train_status, True, train_color)
-        screen.blit(train_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - train_text.get_width() // 2, 285))
+        screen.blit(train_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - train_text.get_width() // 2, 370))
         
         # 3D模式信息
         mode_status = "3D模式" if is_3d_mode else "2D模式"
         mode_color = (100, 200, 255) if is_3d_mode else (200, 200, 200)
         mode_text = self.font.render(mode_status, True, mode_color)
-        screen.blit(mode_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - mode_text.get_width() // 2, 310))
+        screen.blit(mode_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - mode_text.get_width() // 2, 395))
 
         # 控制面板
         controls_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 140), pygame.SRCALPHA)
         controls_bg.fill(UI_BACKGROUND)
-        screen.blit(controls_bg, (ui_panel_x + 10, 370))
-        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x + 10, 370, UI_PANEL_WIDTH - 20, 140), 2, border_radius=5)
+        screen.blit(controls_bg, (ui_panel_x + 10, 440))
+        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x + 10, 440, UI_PANEL_WIDTH - 20, 140), 2, border_radius=5)
 
         # 按鈕
         button_width = UI_PANEL_WIDTH - 40
         button_height = 30
-        button_y = 380
+        button_y = 450
         
         # 3D切換按鈕
         self.buttons["3d_toggle"]["rect"] = pygame.Rect(ui_panel_x + 20, button_y, button_width, button_height)
@@ -1532,6 +1634,11 @@ class Game:
         self.snake2.body = [(GRID_WIDTH-6,10),(GRID_WIDTH-7,10),(GRID_WIDTH-8,10)]
         self.food = Food()
         self.attack_effects.clear()
+        
+        # 重置回合統計
+        self.game_stats["episode_steps"] = 0
+        self.game_stats["total_rewards"] = [0.0, 0.0]
+        self.game_stats["avg_rewards"] = [0.0, 0.0]
 
     # 添加缺失的 run 方法
     def run(self):
