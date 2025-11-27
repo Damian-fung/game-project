@@ -1,5 +1,5 @@
 pygame
 PyOpenGL
 numpy
-PyTorch
+torch
 # tensorflow  # optional, very large
