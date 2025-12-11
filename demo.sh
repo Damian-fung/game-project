@@ -10,14 +10,20 @@ echo ""
 echo "正在啟動遊戲（演示模式）..."
 echo ""
 
-# Find Python interpreter
-if command -v py >/dev/null 2>&1; then
-  exec py -3 "$DIR/game.py" --demo "$@"
-elif command -v python >/dev/null 2>&1; then
-  exec python "$DIR/game.py" --demo "$@"
-elif command -v python3 >/dev/null 2>&1; then
-  exec python3 "$DIR/game.py" --demo "$@"
-else
-  echo "Error: No Python interpreter found in PATH. Please install Python or add it to PATH."
-  exit 1
+# Try Python 3.11 first (known working location on this PC)
+if [ -f "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" ]; then
+    exec "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" "$DIR/game.py" --demo "$@"
 fi
+
+# 嘗試多種 Python 命令
+for cmd in "py -3.11" "py -3.10" "py -3" python3 python; do
+    if command -v ${cmd%% *} >/dev/null 2>&1; then
+        if $cmd -c "import pygame, torch, numpy" 2>/dev/null; then
+            exec $cmd "$DIR/game.py" --demo "$@"
+        fi
+    fi
+done
+
+echo "Error: 找不到已安裝 pygame、torch、numpy 的 Python 環境"
+echo "請執行: ./install.sh"
+exit 1

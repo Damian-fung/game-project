@@ -85,18 +85,24 @@ class ReplayMemory:
         return len(self.memory)
 
 class DQNAgent:
-    def __init__(self, input_size, output_size, model_path=None):
+    def __init__(self, input_size, output_size, model_path=None, 
+                 learning_rate=0.001, epsilon_start=1.0, epsilon_min=0.01, 
+                 epsilon_decay=0.995, exploration_strategy='epsilon_greedy'):
         self.input_size = input_size
         self.output_size = output_size
         self.model = DQN(input_size, output_size)
         self.target_model = DQN(input_size, output_size)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         self.memory = ReplayMemory(10000)
         self.batch_size = 32
         self.gamma = 0.95
-        self.epsilon = 1.0
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
+        self.epsilon = epsilon_start
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        self.exploration_strategy = exploration_strategy  # 'epsilon_greedy' or 'boltzmann'
+        self.temperature = 1.0  # Boltzmann 溫度參數
+        self.temperature_min = 0.1
+        self.temperature_decay = 0.998
         self.update_target_every = 100
         self.steps = 0
         self.last_loss = 0.0  # 記錄最近一次訓練損失
@@ -186,13 +192,29 @@ class DQNAgent:
     
     def get_action(self, state):
         """根據當前狀態選擇動作"""
-        if random.random() < self.epsilon:
-            return random.randint(0, self.output_size - 1)
-        
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
-        with torch.no_grad():
-            q_values = self.model(state_tensor)
-        return q_values.max(1)[1].item()
+        
+        if self.exploration_strategy == 'boltzmann':
+            # Boltzmann 探索：根據 Q 值的概率分布選擇
+            with torch.no_grad():
+                q_values = self.model(state_tensor)
+            q_values = q_values.squeeze().numpy()
+            
+            # 使用溫度參數調整概率分布
+            exp_q = np.exp(q_values / self.temperature)
+            probabilities = exp_q / np.sum(exp_q)
+            
+            # 根據概率選擇動作
+            action = np.random.choice(self.output_size, p=probabilities)
+            return action
+        else:
+            # Epsilon-greedy 探索
+            if random.random() < self.epsilon:
+                return random.randint(0, self.output_size - 1)
+            
+            with torch.no_grad():
+                q_values = self.model(state_tensor)
+            return q_values.max(1)[1].item()
     
     def remember(self, state, action, next_state, reward, done):
         """記住經驗"""
@@ -204,17 +226,17 @@ class DQNAgent:
             return
         
         batch = self.memory.sample(self.batch_size)
-        states, actions, next_states, rewards, dones = zip(*batch)
+        states, actions, next_states, rewards, done = zip(*batch)
         
         states = torch.FloatTensor(states)
         actions = torch.LongTensor(actions)
         next_states = torch.FloatTensor(next_states)
         rewards = torch.FloatTensor(rewards)
-        dones = torch.BoolTensor(dones)
+        done = torch.BoolTensor(done)
         
         current_q_values = self.model(states).gather(1, actions.unsqueeze(1))
         next_q_values = self.target_model(next_states).max(1)[0].detach()
-        target_q_values = rewards + (self.gamma * next_q_values * ~dones)
+        target_q_values = rewards + (self.gamma * next_q_values * ~done)
         
         loss = F.mse_loss(current_q_values.squeeze(), target_q_values)
         
@@ -225,9 +247,15 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
         
-        # 更新epsilon
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+        # 更新探索參數
+        if self.exploration_strategy == 'boltzmann':
+            # 降低溫度，使選擇更確定
+            if self.temperature > self.temperature_min:
+                self.temperature *= self.temperature_decay
+        else:
+            # 降低 epsilon
+            if self.epsilon > self.epsilon_min:
+                self.epsilon *= self.epsilon_decay
         
         # 定期更新目標網絡
         self.steps += 1
@@ -844,10 +872,23 @@ class Game:
             os.makedirs(self.model_dir)
         
         # 加載或創建AI代理
+        # 蛇1: 激進型 - 快速衰減的 ε-greedy
         self.ai1 = DQNAgent(self.input_size, self.output_size, 
-                           os.path.join(self.model_dir, "snake1_model.pth"))
+                           os.path.join(self.model_dir, "snake1_model.pth"),
+                           learning_rate=0.001,
+                           epsilon_start=1.0,
+                           epsilon_min=0.01,
+                           epsilon_decay=0.995,
+                           exploration_strategy='epsilon_greedy')
+        
+        # 蛇2: 穩健型 - 慢速衰減 + Boltzmann 探索
         self.ai2 = DQNAgent(self.input_size, self.output_size, 
-                           os.path.join(self.model_dir, "snake2_model.pth"))
+                           os.path.join(self.model_dir, "snake2_model.pth"),
+                           learning_rate=0.0008,
+                           epsilon_start=0.8,
+                           epsilon_min=0.05,
+                           epsilon_decay=0.998,
+                           exploration_strategy='boltzmann')
         
         # 訓練模式
         self.training_mode = training_mode
@@ -1127,7 +1168,7 @@ class Game:
                 for button_name, button_data in self.buttons.items():
                     button_data["hover"] = button_data["rect"].collidepoint(mouse_pos)
 
-    def calculate_reward(self, snake, other_snake, action, prev_state, new_state, done):
+    def calculate_reward(self, snake, other_snake, action, prev_state, new_state, done, dist_change_food=0, dist_change_enemy=0):
         """計算強化學習的獎勵"""
         reward = 0
         
@@ -1152,6 +1193,19 @@ class Game:
         if snake.total_steps > 100 and snake.score == 0:
             reward -= 0.1
         
+        # 根據與食物的距離變化調整獎勵
+        if dist_change_food > 0:
+            # 靠近食物，給予小獎勵
+            reward += 0.1
+        elif dist_change_food < 0:
+            # 遠離食物，給予小懲罰
+            reward -= 0.05
+        
+        # 可選：根據與敵人的距離調整（可以根據策略調整）
+        # 當前策略：保持中等距離，太近或太遠都不好
+        # if dist_change_enemy > 0 and 敵人距雩已經很近:
+        #     reward -= 0.05  # 太靠近敵人可能危險
+        
         return reward
 
     def update(self):
@@ -1169,7 +1223,11 @@ class Game:
         action1 = self.ai1.get_action(state1)
         action2 = self.ai2.get_action(state2)
 
-        # TODO calculate old distance to apple and enemy
+        # 計算移動前的距離（曼哈頓距離）
+        old_dist_to_food_1 = abs(self.snake1.body[0][0] - self.food.position[0]) + abs(self.snake1.body[0][1] - self.food.position[1])
+        old_dist_to_food_2 = abs(self.snake2.body[0][0] - self.food.position[0]) + abs(self.snake2.body[0][1] - self.food.position[1])
+        old_dist_to_enemy_1 = abs(self.snake1.body[0][0] - self.snake2.body[0][0]) + abs(self.snake1.body[0][1] - self.snake2.body[0][1])
+        old_dist_to_enemy_2 = abs(self.snake2.body[0][0] - self.snake1.body[0][0]) + abs(self.snake2.body[0][1] - self.snake1.body[0][1])
         
         # 更新AI蛇1
         if self.snake1.alive:
@@ -1187,10 +1245,17 @@ class Game:
             if self.snake2.check_self_collision():
                 self.snake2.alive = False
         
-        # TODO calculate new distance to apple and enemy
-
-        # TODO calculate if getting closer or farther with food, adjust reward score
+        # 計算移動後的距離
+        new_dist_to_food_1 = abs(self.snake1.body[0][0] - self.food.position[0]) + abs(self.snake1.body[0][1] - self.food.position[1]) if self.snake1.alive else old_dist_to_food_1
+        new_dist_to_food_2 = abs(self.snake2.body[0][0] - self.food.position[0]) + abs(self.snake2.body[0][1] - self.food.position[1]) if self.snake2.alive else old_dist_to_food_2
+        new_dist_to_enemy_1 = abs(self.snake1.body[0][0] - self.snake2.body[0][0]) + abs(self.snake1.body[0][1] - self.snake2.body[0][1]) if self.snake1.alive and self.snake2.alive else old_dist_to_enemy_1
+        new_dist_to_enemy_2 = abs(self.snake2.body[0][0] - self.snake1.body[0][0]) + abs(self.snake2.body[0][1] - self.snake1.body[0][1]) if self.snake1.alive and self.snake2.alive else old_dist_to_enemy_2
         
+        # 計算距離變化
+        dist_change_food_1 = old_dist_to_food_1 - new_dist_to_food_1  # 正值表示靠近
+        dist_change_food_2 = old_dist_to_food_2 - new_dist_to_food_2
+        dist_change_enemy_1 = old_dist_to_enemy_1 - new_dist_to_enemy_1
+        dist_change_enemy_2 = old_dist_to_enemy_2 - new_dist_to_enemy_2
 
         # 檢查吃食物
         for snake in [self.snake1, self.snake2]:
@@ -1211,9 +1276,9 @@ class Game:
         new_state1 = self.ai1.get_state(self.snake1, self.food, self.snake2)
         new_state2 = self.ai2.get_state(self.snake2, self.food, self.snake1)
         
-        # 計算獎勵
-        reward1 = self.calculate_reward(self.snake1, self.snake2, action1, state1, new_state1, not self.snake1.alive)
-        reward2 = self.calculate_reward(self.snake2, self.snake1, action2, state2, new_state2, not self.snake2.alive)
+        # 計算獎勵（傳遞距離變化）
+        reward1 = self.calculate_reward(self.snake1, self.snake2, action1, state1, new_state1, not self.snake1.alive, dist_change_food_1, dist_change_enemy_1)
+        reward2 = self.calculate_reward(self.snake2, self.snake1, action2, state2, new_state2, not self.snake2.alive, dist_change_food_2, dist_change_enemy_2)
         
         # 累積獎勵
         self.game_stats["total_rewards"][0] += reward1

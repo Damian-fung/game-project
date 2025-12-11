@@ -8,17 +8,25 @@ echo "  訓練數據分析工具"
 echo "========================================"
 echo ""
 
-# Find Python interpreter
-if command -v py >/dev/null 2>&1; then
-  py -3 "$DIR/analyze_training.py" "$@"
-elif command -v python >/dev/null 2>&1; then
-  python "$DIR/analyze_training.py" "$@"
-elif command -v python3 >/dev/null 2>&1; then
-  python3 "$DIR/analyze_training.py" "$@"
-else
-  echo "Error: No Python interpreter found in PATH. Please install Python or add it to PATH."
-  exit 1
+# Try Python 3.11 first (known working location on this PC)
+if [ -f "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" ]; then
+    "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" "$DIR/analyze_training.py" "$@"
+    exit $?
 fi
+
+# 嘗試多種 Python 命令
+for cmd in "py -3.11" "py -3.10" "py -3" python3 python; do
+    if command -v ${cmd%% *} >/dev/null 2>&1; then
+        if $cmd -c "import pygame, torch, numpy" 2>/dev/null; then
+            $cmd "$DIR/analyze_training.py" "$@"
+            exit $?
+        fi
+    fi
+done
+
+echo "Error: 找不到已安裝 pygame、torch、numpy 的 Python 環境"
+echo "請執行: ./install.sh"
+exit 1
 
 echo ""
 read -p "按 Enter 繼續..."
