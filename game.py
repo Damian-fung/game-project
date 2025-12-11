@@ -18,13 +18,18 @@ GRID_HEIGHT = 20
 CELL_SIZE = 30
 FPS = 10
 
-# UI 面板寬度
-UI_PANEL_WIDTH = 300
+# UI 面板寬度（基礎值，會根據窗口大小調整）
+UI_PANEL_WIDTH_BASE = 300
+UI_PANEL_WIDTH = UI_PANEL_WIDTH_BASE
+
+# 窗口尺寸變量（會動態更新）
+WINDOW_WIDTH = GRID_WIDTH * CELL_SIZE + UI_PANEL_WIDTH_BASE
+WINDOW_HEIGHT = GRID_HEIGHT * CELL_SIZE
 
 # 初始化Pygame
 pygame.init()
 # 設置可調整大小的視窗
-screen = pygame.display.set_mode((GRID_WIDTH * CELL_SIZE + UI_PANEL_WIDTH, GRID_HEIGHT * CELL_SIZE), pygame.RESIZABLE)
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.RESIZABLE)
 pygame.display.set_caption("深度學習貪吃蛇AI對戰")
 clock = pygame.time.Clock()
 
@@ -268,7 +273,8 @@ class DQNAgent:
 
 class Snake:
     def __init__(self, pos, color, name, snake_id):
-        self.body = [pos]
+        # 初始長度：頭部 + 1 身體
+        self.body = [pos, (pos[0] - 1, pos[1])]
         self.direction = RIGHT
         self.color = color
         self.name = name
@@ -332,23 +338,59 @@ class Snake:
         head = self.body[0]
         return head in self.body[1:]
 
+    def get_segment_color(self, segment_index):
+        """根據身體長度計算整體顏色深度
+        1格時最淺，每增加一格身體顏色變深一點
+        到達5格時達到最深
+        segment_index: 參數保留但不使用，所有節段顏色相同
+        """
+        body_length = len(self.body)
+        
+        # 使用飽和度/強度來控制顏色深淺
+        # 身體越長 → intensity 越大 → 顏色越深/越飽和
+        # 1格(只有頭): 0.4 - 最淺/最不飽和 ✓
+        # 2格(頭+1身體): 0.55
+        # 3格(頭+2身體): 0.70
+        # 4格(頭+3身體): 0.85
+        # 5格(頭+4身體)及以上: 1.0 - 最深/最飽和 ✓
+        if body_length <= 1:
+            intensity = 0.4  # 最淺
+        elif body_length == 2:
+            intensity = 0.55
+        elif body_length == 3:
+            intensity = 0.70
+        elif body_length == 4:
+            intensity = 0.85
+        else:  # 5格及以上
+            intensity = 1.0  # 最深
+        
+        # 計算最終顏色（整條蛇統一顏色深度）
+        r = int(self.color[0] * intensity)
+        g = int(self.color[1] * intensity)
+        b = int(self.color[2] * intensity)
+        
+        return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+
     def draw(self, surface):
         for i, segment in enumerate(self.body):
             x, y = segment
             
             if is_3d_mode:
-                self.draw_3d_segment(surface, x, y, i == 0)
+                self.draw_3d_segment(surface, x, y, i == 0, i)
             else:
-                self.draw_2d_segment(surface, x, y, i == 0)
+                self.draw_2d_segment(surface, x, y, i == 0, i)
     
-    def draw_2d_segment(self, surface, x, y, is_head):
+    def draw_2d_segment(self, surface, x, y, is_head, segment_index):
         rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+        
+        # 獲取當前節段的漸變顏色
+        segment_color = self.get_segment_color(segment_index)
 
         if is_head:  # 頭部
             # 繪製帶陰影的頭部
             shadow_rect = pygame.Rect(x * CELL_SIZE + 2, y * CELL_SIZE + 2, CELL_SIZE, CELL_SIZE)
-            pygame.draw.rect(surface, (max(0, self.color[0]-30), max(0, self.color[1]-30), max(0, self.color[2]-30)), shadow_rect, border_radius=5)
-            pygame.draw.rect(surface, self.color, rect, border_radius=5)
+            pygame.draw.rect(surface, (max(0, segment_color[0]-30), max(0, segment_color[1]-30), max(0, segment_color[2]-30)), shadow_rect, border_radius=5)
+            pygame.draw.rect(surface, segment_color, rect, border_radius=5)
             
             # 繪製眼睛表示方向
             self.draw_eyes(surface, x, y)
@@ -358,14 +400,17 @@ class Snake:
         else:  # 身體
             # 繪製帶陰影的身體
             shadow_rect = pygame.Rect(x * CELL_SIZE + 2, y * CELL_SIZE + 2, CELL_SIZE, CELL_SIZE)
-            pygame.draw.rect(surface, (max(0, self.color[0]-30), max(0, self.color[1]-30), max(0, self.color[2]-30)), shadow_rect, border_radius=5)
-            pygame.draw.rect(surface, self.color, rect, border_radius=5)
+            pygame.draw.rect(surface, (max(0, segment_color[0]-30), max(0, segment_color[1]-30), max(0, segment_color[2]-30)), shadow_rect, border_radius=5)
+            pygame.draw.rect(surface, segment_color, rect, border_radius=5)
             
             # 繪製身體紋理
             inner_rect = pygame.Rect(x * CELL_SIZE + 5, y * CELL_SIZE + 5, CELL_SIZE - 10, CELL_SIZE - 10)
-            pygame.draw.rect(surface, (min(255, self.color[0]+30), min(255, self.color[1]+30), min(255, self.color[2]+30)), inner_rect, border_radius=3)
+            pygame.draw.rect(surface, (min(255, segment_color[0]+30), min(255, segment_color[1]+30), min(255, segment_color[2]+30)), inner_rect, border_radius=3)
 
-    def draw_3d_segment(self, surface, x, y, is_head):
+    def draw_3d_segment(self, surface, x, y, is_head, segment_index):
+        # 獲取當前節段的漸變顏色
+        segment_color = self.get_segment_color(segment_index)
+        
         # 等角投影參數
         iso_scale = 0.7
         iso_x = (x - y) * (CELL_SIZE * iso_scale)
@@ -390,13 +435,13 @@ class Snake:
         
         # 繪製3D方塊的側面
         side_color = (
-            max(0, self.color[0] - 40),
-            max(0, self.color[1] - 40),
-            max(0, self.color[2] - 40)
+            max(0, segment_color[0] - 40),
+            max(0, segment_color[1] - 40),
+            max(0, segment_color[2] - 40)
         )
         
         # 繪製頂面
-        pygame.draw.polygon(surface, self.color, points_top)
+        pygame.draw.polygon(surface, segment_color, points_top)
         
         # 繪製側面
         side_points = [
@@ -409,9 +454,9 @@ class Snake:
         
         # 繪製前面
         front_color = (
-            max(0, self.color[0] - 20),
-            max(0, self.color[1] - 20),
-            max(0, self.color[2] - 20)
+            max(0, segment_color[0] - 20),
+            max(0, segment_color[1] - 20),
+            max(0, segment_color[2] - 20)
         )
         front_points = [
             (iso_x, iso_y + height),
@@ -429,9 +474,9 @@ class Snake:
             (iso_x + CELL_SIZE * iso_scale * 0.1, iso_y + CELL_SIZE * iso_scale * 0.2)
         ]
         highlight_color = (
-            min(255, self.color[0] + 50),
-            min(255, self.color[1] + 50),
-            min(255, self.color[2] + 50),
+            min(255, segment_color[0] + 50),
+            min(255, segment_color[1] + 50),
+            min(255, segment_color[2] + 50),
             100
         )
         
@@ -850,12 +895,10 @@ class AttackEffect:
 
 class Game:
     def __init__(self, training_mode=True):
-        self.snake1 = Snake((5, 10), (50, 200, 50), "AI蛇1", 0)
-        self.snake2 = Snake((GRID_WIDTH-6, 10), (50, 50, 200), "AI蛇2", 1)
-        # 初始身體都給 3 格，避免剛開始超短容易被扣光
-        self.snake1.body = [(5,10),(4,10),(3,10)]
-        self.snake2.body = [(GRID_WIDTH-6,10),(GRID_WIDTH-7,10),(GRID_WIDTH-8,10)]
-
+        self.snake1 = Snake((5, 10), (255, 100, 100), "AI蛇1", 0)  # 紅色
+        self.snake2 = Snake((GRID_WIDTH-6, 10), (100, 255, 100), "AI蛇2", 1)  # 綠色
+        # Snake類已經初始化為頭部+1身體，不需要額外設置
+        
         self.food = Food()
         self.running = True
         self.font = pygame.font.SysFont('simhei', 20)
@@ -1125,11 +1168,36 @@ class Game:
             surface.blit(s, (iso_x - radius, iso_y - radius))
 
     def handle_events(self):
-        global paused, is_3d_mode
+        global paused, is_3d_mode, CELL_SIZE, UI_PANEL_WIDTH, WINDOW_WIDTH, WINDOW_HEIGHT, screen
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif event.type == pygame.VIDEORESIZE:
+                # 處理窗口調整大小
+                WINDOW_WIDTH, WINDOW_HEIGHT = event.size
+                
+                # 確保最小尺寸
+                min_width = 800
+                min_height = 600
+                WINDOW_WIDTH = max(WINDOW_WIDTH, min_width)
+                WINDOW_HEIGHT = max(WINDOW_HEIGHT, min_height)
+                
+                # 計算UI面板寬度（佔窗口寬度的20-25%）
+                UI_PANEL_WIDTH = max(250, min(400, int(WINDOW_WIDTH * 0.25)))
+                
+                # 計算遊戲區域可用寬度和高度
+                game_area_width = WINDOW_WIDTH - UI_PANEL_WIDTH
+                game_area_height = WINDOW_HEIGHT
+                
+                # 計算適合的CELL_SIZE，確保遊戲網格完整顯示
+                cell_width = game_area_width // GRID_WIDTH
+                cell_height = game_area_height // GRID_HEIGHT
+                CELL_SIZE = max(15, min(cell_width, cell_height))  # 最小15像素
+                
+                # 更新屏幕
+                screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.RESIZABLE)
+                pygame.display.set_caption("深度學習貪吃蛇AI對戰")
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
@@ -1139,6 +1207,7 @@ class Game:
                     paused = not paused
                 elif event.key == pygame.K_t:
                     self.training_mode = not self.training_mode
+                    self.reset_episode()
                     print(f"訓練模式: {'開啟' if self.training_mode else '關閉'}")
                 elif event.key == pygame.K_s:
                     self.save_models()
@@ -1156,6 +1225,7 @@ class Game:
                             print(f"3D模式: {'開啟' if is_3d_mode else '關閉'}")
                         elif button_name == "train_toggle":
                             self.training_mode = not self.training_mode
+                            self.reset_episode()
                             print(f"訓練模式: {'開啟' if self.training_mode else '關閉'}")
                         elif button_name == "reset":
                             self.reset_episode()
@@ -1476,7 +1546,11 @@ class Game:
         graph_width = width - 40
         graph_height = height - 40
         
-        # 蛇1的學習曲線（藍色）
+        # 定義蛇的顏色（與遊戲中的顏色一致）
+        snake1_color = (255, 100, 100)  # 紅色
+        snake2_color = (100, 255, 100)  # 綠色
+        
+        # 蛇1的學習曲線（紅色）
         if len(episodes) > 1:
             points1 = []
             for i, episode in enumerate(episodes):
@@ -1487,12 +1561,12 @@ class Game:
                 points1.append((point_x, point_y))
             
             if len(points1) > 1:
-                pygame.draw.lines(surface, (50, 150, 255), False, points1, 2)
+                pygame.draw.lines(surface, snake1_color, False, points1, 2)
                 # 繪製數據點
                 for point in points1:
-                    pygame.draw.circle(surface, (50, 150, 255), point, 3)
+                    pygame.draw.circle(surface, snake1_color, point, 3)
         
-        # 蛇2的學習曲線（紅色）
+        # 蛇2的學習曲線（綠色）
         if len(episodes) > 1:
             points2 = []
             for i, episode in enumerate(episodes):
@@ -1503,19 +1577,19 @@ class Game:
                 points2.append((point_x, point_y))
             
             if len(points2) > 1:
-                pygame.draw.lines(surface, (255, 50, 50), False, points2, 2)
+                pygame.draw.lines(surface, snake2_color, False, points2, 2)
                 # 繪製數據點
                 for point in points2:
-                    pygame.draw.circle(surface, (255, 50, 50), point, 3)
+                    pygame.draw.circle(surface, snake2_color, point, 3)
         
         # 圖例
         legend_y = y + height - 15
-        pygame.draw.line(surface, (50, 150, 255), (x + 10, legend_y), (x + 30, legend_y), 2)
-        legend1_text = self.small_font.render("AI蛇1", True, (50, 150, 255))
+        pygame.draw.line(surface, snake1_color, (x + 10, legend_y), (x + 30, legend_y), 2)
+        legend1_text = self.small_font.render("AI蛇1", True, snake1_color)
         surface.blit(legend1_text, (x + 35, legend_y - 8))
         
-        pygame.draw.line(surface, (255, 50, 50), (x + 90, legend_y), (x + 110, legend_y), 2)
-        legend2_text = self.small_font.render("AI蛇2", True, (255, 50, 50))
+        pygame.draw.line(surface, snake2_color, (x + 90, legend_y), (x + 110, legend_y), 2)
+        legend2_text = self.small_font.render("AI蛇2", True, snake2_color)
         surface.blit(legend2_text, (x + 115, legend_y - 8))
 
     def draw(self):
@@ -1547,43 +1621,47 @@ class Game:
         pygame.display.flip()
 
     def draw_ui(self):
-        # 計算UI面板位置
-        ui_panel_x = GRID_WIDTH * CELL_SIZE
+        # 計算UI面板位置（確保不與遊戲區域重疊）
+        ui_panel_x = GRID_WIDTH * CELL_SIZE + 10  # 添加10像素間隔
         
         # 繪製UI面板背景
-        ui_bg = pygame.Surface((UI_PANEL_WIDTH, GRID_HEIGHT * CELL_SIZE), pygame.SRCALPHA)
+        ui_bg = pygame.Surface((UI_PANEL_WIDTH - 10, WINDOW_HEIGHT), pygame.SRCALPHA)
         ui_bg.fill(UI_BACKGROUND)
         screen.blit(ui_bg, (ui_panel_x, 0))
         
+        # 計算可用UI寬度
+        ui_width = UI_PANEL_WIDTH - 20
+        
         # 標題
         title_text = self.title_font.render("深度學習AI貪吃蛇大戰", True, HIGHLIGHT_COLOR)
-        screen.blit(title_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - title_text.get_width() // 2, 10))
+        screen.blit(title_text, (ui_panel_x + ui_width // 2 - title_text.get_width() // 2, 10))
 
-        # AI狀態面板
+        # AI狀態面板（根據窗口高度動態調整間距）
+        ai_panel_height = min(120, int(WINDOW_HEIGHT * 0.15))
         for i, snake in enumerate([self.snake1, self.snake2]):
-            y_pos = 50 + i * 130
+            y_pos = 50 + i * (ai_panel_height + 10)
 
             # 繪製AI狀態背景
-            ai_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 120), pygame.SRCALPHA)
+            ai_bg = pygame.Surface((ui_width, ai_panel_height), pygame.SRCALPHA)
             ai_bg.fill((snake.color[0]//4, snake.color[1]//4, snake.color[2]//4, 150))
-            screen.blit(ai_bg, (ui_panel_x + 10, y_pos))
-            pygame.draw.rect(screen, snake.color, (ui_panel_x + 10, y_pos, UI_PANEL_WIDTH - 20, 120), 2, border_radius=5)
+            screen.blit(ai_bg, (ui_panel_x, y_pos))
+            pygame.draw.rect(screen, snake.color, (ui_panel_x, y_pos, ui_width, ai_panel_height), 2, border_radius=5)
 
             # AI標題
             ai_title = self.font.render(f"{snake.name}", True, snake.color)
-            screen.blit(ai_title, (ui_panel_x + 20, y_pos + 5))
+            screen.blit(ai_title, (ui_panel_x + 10, y_pos + 5))
 
             # 分數和長度
             score_text = self.small_font.render(f"分數: {snake.score}", True, TEXT_COLOR)
             length_text = self.small_font.render(f"長度: {len(snake.body)}", True, TEXT_COLOR)
-            screen.blit(score_text, (ui_panel_x + 20, y_pos + 30))
-            screen.blit(length_text, (ui_panel_x + 20, y_pos + 50))
+            screen.blit(score_text, (ui_panel_x + 10, y_pos + 30))
+            screen.blit(length_text, (ui_panel_x + 10, y_pos + 50))
 
             # 狀態
             status = "存活" if snake.alive else "死亡"
             status_color = (0, 255, 0) if snake.alive else (255, 0, 0)
             status_text = self.small_font.render(f"狀態: {status}", True, status_color)
-            screen.blit(status_text, (ui_panel_x + 120, y_pos + 30))
+            screen.blit(status_text, (ui_panel_x + ui_width // 2 + 10, y_pos + 30))
             
             # AI信息
             epsilon = self.ai1.epsilon if i == 0 else self.ai2.epsilon
@@ -1591,119 +1669,128 @@ class Game:
             reward = self.game_stats["total_rewards"][i]
             
             ai_info = self.small_font.render(f"探索率: {epsilon:.3f}", True, (200, 200, 100))
-            screen.blit(ai_info, (ui_panel_x + 120, y_pos + 50))
+            screen.blit(ai_info, (ui_panel_x + ui_width // 2 + 10, y_pos + 50))
             
             # 顯示損失和獎勵
             loss_text = self.small_font.render(f"損失: {loss:.4f}", True, (255, 150, 150))
-            screen.blit(loss_text, (ui_panel_x + 20, y_pos + 70))
+            screen.blit(loss_text, (ui_panel_x + 10, y_pos + 70))
             
             reward_text = self.small_font.render(f"獎勵: {reward:.2f}", True, (150, 255, 150))
-            screen.blit(reward_text, (ui_panel_x + 120, y_pos + 70))
+            screen.blit(reward_text, (ui_panel_x + ui_width // 2 + 10, y_pos + 70))
             
             # 平均獎勵
             avg_reward = self.game_stats["avg_rewards"][i]
             avg_text = self.small_font.render(f"平均: {avg_reward:.3f}", True, (150, 200, 255))
-            screen.blit(avg_text, (ui_panel_x + 20, y_pos + 92))
+            screen.blit(avg_text, (ui_panel_x + 10, y_pos + 92))
 
-        # 中央信息面板
-        center_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 120), pygame.SRCALPHA)
+        # 中央信息面板（動態計算位置）
+        center_y = 50 + 2 * (ai_panel_height + 10) + 10
+        center_panel_height = min(120, int(WINDOW_HEIGHT * 0.15))
+        center_bg = pygame.Surface((ui_width, center_panel_height), pygame.SRCALPHA)
         center_bg.fill((40, 45, 60, 200))
-        screen.blit(center_bg, (ui_panel_x + 10, 310))
-        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x + 10, 310, UI_PANEL_WIDTH - 20, 120), 2, border_radius=5)
+        screen.blit(center_bg, (ui_panel_x, center_y))
+        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x, center_y, ui_width, center_panel_height), 2, border_radius=5)
 
         # 回合信息
         episode_text = self.font.render(f"回合: {self.game_stats['episode']}", True, TEXT_COLOR)
-        screen.blit(episode_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - episode_text.get_width() // 2, 320))
+        screen.blit(episode_text, (ui_panel_x + ui_width // 2 - episode_text.get_width() // 2, center_y + 10))
         
         # 步數信息
         steps_text = self.small_font.render(f"步數: {self.game_stats['episode_steps']}", True, TEXT_COLOR)
-        screen.blit(steps_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - steps_text.get_width() // 2, 345))
+        screen.blit(steps_text, (ui_panel_x + ui_width // 2 - steps_text.get_width() // 2, center_y + 35))
         
         # 訓練信息
         train_status = "訓練中" if self.training_mode else "演示模式"
         train_color = (0, 255, 0) if self.training_mode else (255, 255, 0)
         train_text = self.font.render(train_status, True, train_color)
-        screen.blit(train_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - train_text.get_width() // 2, 370))
+        screen.blit(train_text, (ui_panel_x + ui_width // 2 - train_text.get_width() // 2, center_y + 60))
         
         # 3D模式信息
         mode_status = "3D模式" if is_3d_mode else "2D模式"
         mode_color = (100, 200, 255) if is_3d_mode else (200, 200, 200)
         mode_text = self.font.render(mode_status, True, mode_color)
-        screen.blit(mode_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - mode_text.get_width() // 2, 395))
+        screen.blit(mode_text, (ui_panel_x + ui_width // 2 - mode_text.get_width() // 2, center_y + 85))
 
-        # 控制面板
-        controls_bg = pygame.Surface((UI_PANEL_WIDTH - 20, 140), pygame.SRCALPHA)
+        # 控制面板（動態計算位置）
+        controls_y = center_y + center_panel_height + 10
+        controls_height = min(160, int(WINDOW_HEIGHT * 0.2))
+        controls_bg = pygame.Surface((ui_width, controls_height), pygame.SRCALPHA)
         controls_bg.fill(UI_BACKGROUND)
-        screen.blit(controls_bg, (ui_panel_x + 10, 440))
-        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x + 10, 440, UI_PANEL_WIDTH - 20, 140), 2, border_radius=5)
+        screen.blit(controls_bg, (ui_panel_x, controls_y))
+        pygame.draw.rect(screen, UI_BORDER, (ui_panel_x, controls_y, ui_width, controls_height), 2, border_radius=5)
 
-        # 按鈕
-        button_width = UI_PANEL_WIDTH - 40
-        button_height = 30
-        button_y = 450
+        # 按鈕（動態計算尺寸和位置）
+        button_width = ui_width - 20
+        button_height = max(25, min(35, int(WINDOW_HEIGHT * 0.04)))
+        button_y = controls_y + 10
+        button_spacing = button_height + 5
         
         # 3D切換按鈕
-        self.buttons["3d_toggle"]["rect"] = pygame.Rect(ui_panel_x + 20, button_y, button_width, button_height)
+        self.buttons["3d_toggle"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y, button_width, button_height)
         button_color = BUTTON_HOVER if self.buttons["3d_toggle"]["hover"] else BUTTON_COLOR
         pygame.draw.rect(screen, button_color, self.buttons["3d_toggle"]["rect"], border_radius=5)
         pygame.draw.rect(screen, UI_BORDER, self.buttons["3d_toggle"]["rect"], 2, border_radius=5)
         button_text = self.small_font.render("切換3D模式", True, TEXT_COLOR)
-        screen.blit(button_text, (ui_panel_x + 20 + (button_width - button_text.get_width()) // 2, button_y + 7))
+        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + (button_height - button_text.get_height()) // 2))
 
         # 訓練模式切換按鈕
-        self.buttons["train_toggle"]["rect"] = pygame.Rect(ui_panel_x + 20, button_y + 40, button_width, button_height)
+        self.buttons["train_toggle"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + button_spacing, button_width, button_height)
         button_color = BUTTON_HOVER if self.buttons["train_toggle"]["hover"] else BUTTON_COLOR
         pygame.draw.rect(screen, button_color, self.buttons["train_toggle"]["rect"], border_radius=5)
         pygame.draw.rect(screen, UI_BORDER, self.buttons["train_toggle"]["rect"], 2, border_radius=5)
         button_text = self.small_font.render("切換訓練模式", True, TEXT_COLOR)
-        screen.blit(button_text, (ui_panel_x + 20 + (button_width - button_text.get_width()) // 2, button_y + 47))
+        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + button_spacing + (button_height - button_text.get_height()) // 2))
 
         # 重置按鈕
-        self.buttons["reset"]["rect"] = pygame.Rect(ui_panel_x + 20, button_y + 80, button_width, button_height)
+        self.buttons["reset"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + 2 * button_spacing, button_width, button_height)
         button_color = BUTTON_HOVER if self.buttons["reset"]["hover"] else BUTTON_COLOR
         pygame.draw.rect(screen, button_color, self.buttons["reset"]["rect"], border_radius=5)
         pygame.draw.rect(screen, UI_BORDER, self.buttons["reset"]["rect"], 2, border_radius=5)
         button_text = self.small_font.render("重置回合", True, TEXT_COLOR)
-        screen.blit(button_text, (ui_panel_x + 20 + (button_width - button_text.get_width()) // 2, button_y + 87))
+        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 2 * button_spacing + (button_height - button_text.get_height()) // 2))
 
         # 保存按鈕
-        self.buttons["save"]["rect"] = pygame.Rect(ui_panel_x + 20, button_y + 120, button_width, button_height)
+        self.buttons["save"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + 3 * button_spacing, button_width, button_height)
         button_color = BUTTON_HOVER if self.buttons["save"]["hover"] else BUTTON_COLOR
         pygame.draw.rect(screen, button_color, self.buttons["save"]["rect"], border_radius=5)
         pygame.draw.rect(screen, UI_BORDER, self.buttons["save"]["rect"], 2, border_radius=5)
         button_text = self.small_font.render("保存模型", True, TEXT_COLOR)
-        screen.blit(button_text, (ui_panel_x + 20 + (button_width - button_text.get_width()) // 2, button_y + 127))
+        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 3 * button_spacing + (button_height - button_text.get_height()) // 2))
 
-        # 學習曲線圖 - 放在控制面板下方
-        self.draw_learning_graph(screen, ui_panel_x + 10, 520, UI_PANEL_WIDTH - 20, 150)
+        # 學習曲線圖 - 放在控制面板下方（動態計算位置和尺寸）
+        graph_y = controls_y + controls_height + 10
+        graph_height = max(100, min(150, int(WINDOW_HEIGHT * 0.15)))
+        if graph_y + graph_height + 100 < WINDOW_HEIGHT:  # 確保有足夠空間
+            self.draw_learning_graph(screen, ui_panel_x, graph_y, ui_width, graph_height)
 
-        # 控制提示 - 放在學習曲線圖下方
-        controls = [
-            "ESC: 退出遊戲",
-            "空格: 暫停/繼續",
-            "R: 重置回合",
-            "T: 切換訓練模式",
-            "S: 保存模型",
-            "D: 切換3D模式"
-        ]
+        # 控制提示 - 放在底部（動態計算位置）
+        controls_text_y = WINDOW_HEIGHT - 140
+        if controls_text_y > graph_y + graph_height + 10:
+            controls = [
+                "ESC: 退出遊戲",
+                "空格: 暫停/繼續",
+                "R: 重置回合",
+                "T: 切換訓練模式",
+                "S: 保存模型",
+                "D: 切換3D模式"
+            ]
 
-        for i, control in enumerate(controls):
-            control_text = self.small_font.render(control, True, TEXT_COLOR)
-            screen.blit(control_text, (ui_panel_x + 20, 680 + i * 20))
+            for i, control in enumerate(controls):
+                control_text = self.small_font.render(control, True, TEXT_COLOR)
+                screen.blit(control_text, (ui_panel_x + 10, controls_text_y + i * 20))
 
         # 勝利統計 - 放在控制提示上方
+        wins_y = max(graph_y + graph_height + 20, WINDOW_HEIGHT - 160)
         wins_text = self.small_font.render(
             f"勝利: AI1 {self.game_stats['wins'][0]} - AI2 {self.game_stats['wins'][1]}",
             True, TEXT_COLOR
         )
-        screen.blit(wins_text, (ui_panel_x + UI_PANEL_WIDTH // 2 - wins_text.get_width() // 2, 670))
+        screen.blit(wins_text, (ui_panel_x + ui_width // 2 - wins_text.get_width() // 2, wins_y))
 
     def reset_episode(self):
-        # 重置蛇（保留初始三格設計）
-        self.snake1 = Snake((5, 10), (50, 200, 50), "AI蛇1", 0)
-        self.snake2 = Snake((GRID_WIDTH - 6, 10), (50, 50, 200), "AI蛇2", 1)
-        self.snake1.body = [(5,10),(4,10),(3,10)]
-        self.snake2.body = [(GRID_WIDTH-6,10),(GRID_WIDTH-7,10),(GRID_WIDTH-8,10)]
+        # 重置蛇（初始長度：頭部 + 1 身體）
+        self.snake1 = Snake((5, 10), (255, 100, 100), "AI蛇1", 0)  # 紅色
+        self.snake2 = Snake((GRID_WIDTH - 6, 10), (100, 255, 100), "AI蛇2", 1)  # 綠色
         self.food = Food()
         self.attack_effects.clear()
         

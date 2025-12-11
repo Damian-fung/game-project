@@ -12,12 +12,15 @@ echo ""
 echo "🔍 掃描 Python 環境..."
 echo ""
 
-# 候選 Python 命令列表（優先使用已知的工作版本）
+# 候選 Python 命令列表（優先使用較新版本）
 PYTHON_CANDIDATES=(
-    "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe"
+    "py -3.13"
+    "py -3.12"
     "py -3.11"
     "py -3.10"
     "py -3"
+    "python3.13"
+    "python3.12"
     "python3.11"
     "python3.10"
     "python3"

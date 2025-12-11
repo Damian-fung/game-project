@@ -3,13 +3,8 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Try Python 3.11 first (known working location on this PC)
-if [ -f "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" ]; then
-    exec "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" "$DIR/game.py" "$@"
-fi
-
-# 嘗試多種 Python 命令
-for cmd in "py -3.11" "py -3.10" "py -3" python3 python; do
+# 嘗試多種 Python 命令（優先使用較新版本）
+for cmd in "py -3.13" "py -3.12" "py -3.11" "py -3.10" "py -3" python3.13 python3.12 python3.11 python3.10 python3 python; do
     # 檢查命令是否存在
     if command -v ${cmd%% *} >/dev/null 2>&1; then
         # 檢測是否安裝了必需套件

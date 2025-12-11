@@ -10,13 +10,8 @@ echo ""
 echo "正在啟動遊戲（演示模式）..."
 echo ""
 
-# Try Python 3.11 first (known working location on this PC)
-if [ -f "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" ]; then
-    exec "/c/Users/NEO/AppData/Local/Programs/Python/Python311/python.exe" "$DIR/game.py" --demo "$@"
-fi
-
-# 嘗試多種 Python 命令
-for cmd in "py -3.11" "py -3.10" "py -3" python3 python; do
+# 嘗試多種 Python 版本（優先使用較新版本）
+for cmd in "py -3.13" "py -3.12" "py -3.11" "py -3.10" "py -3" python3.13 python3.12 python3.11 python3.10 python3 python; do
     if command -v ${cmd%% *} >/dev/null 2>&1; then
         if $cmd -c "import pygame, torch, numpy" 2>/dev/null; then
             exec $cmd "$DIR/game.py" --demo "$@"
