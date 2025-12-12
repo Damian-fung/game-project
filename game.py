@@ -46,6 +46,9 @@ paused = False
 # 3D顯示模式
 is_3d_mode = False
 
+# 加速模式（3倍速）
+speed_boost = False
+
 # 顏色定義
 BACKGROUND = (15, 20, 30)
 GRID_COLOR = (40, 50, 80)
@@ -1093,6 +1096,9 @@ class Game:
         # 訓練模式
         self.training_mode = training_mode
         
+        # 加速模式
+        self.speed_boost = False
+        
         # 遊戲統計
         self.game_stats = {
             "episode": 0,
@@ -1117,6 +1123,7 @@ class Game:
 
         # 按鈕狀態
         self.buttons = {
+            "speed_boost": {"rect": pygame.Rect(0, 0, 0, 0), "hover": False},
             "3d_toggle": {"rect": pygame.Rect(0, 0, 0, 0), "hover": False},
             "train_toggle": {"rect": pygame.Rect(0, 0, 0, 0), "hover": False},
             "reset": {"rect": pygame.Rect(0, 0, 0, 0), "hover": False},
@@ -1326,7 +1333,7 @@ class Game:
             surface.blit(s, (iso_x - radius, iso_y - radius))
 
     def handle_events(self):
-        global paused, is_3d_mode, CELL_SIZE, UI_PANEL_WIDTH, WINDOW_WIDTH, WINDOW_HEIGHT, screen
+        global paused, is_3d_mode, speed_boost, CELL_SIZE, UI_PANEL_WIDTH, WINDOW_WIDTH, WINDOW_HEIGHT, screen
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1373,12 +1380,20 @@ class Game:
                 elif event.key == pygame.K_d:  # 切換3D模式
                     is_3d_mode = not is_3d_mode
                     print(f"3D模式: {'開啟' if is_3d_mode else '關閉'}")
+                elif event.key == pygame.K_f:  # 切換加速模式
+                    speed_boost = not speed_boost
+                    self.speed_boost = speed_boost
+                    print(f"加速模式: {'開啟 (3倍速)' if speed_boost else '關閉'}")
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # 檢查是否點擊了按鈕
                 mouse_pos = pygame.mouse.get_pos()
                 for button_name, button_data in self.buttons.items():
                     if button_data["rect"].collidepoint(mouse_pos):
-                        if button_name == "3d_toggle":
+                        if button_name == "speed_boost":
+                            speed_boost = not speed_boost
+                            self.speed_boost = speed_boost
+                            print(f"加速模式: {'開啟 (3倍速)' if speed_boost else '關閉'}")
+                        elif button_name == "3d_toggle":
                             is_3d_mode = not is_3d_mode
                             print(f"3D模式: {'開啟' if is_3d_mode else '關閉'}")
                         elif button_name == "train_toggle":
@@ -1798,8 +1813,9 @@ class Game:
 
         # AI狀態面板（根據窗口高度動態調整間距）
         ai_panel_height = min(120, int(WINDOW_HEIGHT * 0.15))
+        ai_panel_spacing = 15  # AI面板之間的間距
         for i, snake in enumerate([self.snake1, self.snake2]):
-            y_pos = 50 + i * (ai_panel_height + 10)
+            y_pos = 50 + i * (ai_panel_height + ai_panel_spacing)
 
             # 繪製AI狀態背景
             ai_bg = pygame.Surface((ui_width, ai_panel_height), pygame.SRCALPHA)
@@ -1844,8 +1860,8 @@ class Game:
             screen.blit(avg_text, (ui_panel_x + 10, y_pos + 92))
 
         # 中央信息面板（動態計算位置）
-        center_y = 50 + 2 * (ai_panel_height + 10) + 10
-        center_panel_height = min(120, int(WINDOW_HEIGHT * 0.15))
+        center_y = 50 + 2 * (ai_panel_height + ai_panel_spacing) + 15  # 增加間距
+        center_panel_height = min(80, int(WINDOW_HEIGHT * 0.1))  # 縮小面板高度
         center_bg = pygame.Surface((ui_width, center_panel_height), pygame.SRCALPHA)
         center_bg.fill((40, 45, 60, 200))
         screen.blit(center_bg, (ui_panel_x, center_y))
@@ -1853,27 +1869,29 @@ class Game:
 
         # 回合信息
         episode_text = self.font.render(f"回合: {self.game_stats['episode']}", True, TEXT_COLOR)
-        screen.blit(episode_text, (ui_panel_x + ui_width // 2 - episode_text.get_width() // 2, center_y + 10))
+        screen.blit(episode_text, (ui_panel_x + ui_width // 2 - episode_text.get_width() // 2, center_y + 8))
         
         # 步數信息
         steps_text = self.small_font.render(f"步數: {self.game_stats['episode_steps']}", True, TEXT_COLOR)
         screen.blit(steps_text, (ui_panel_x + ui_width // 2 - steps_text.get_width() // 2, center_y + 35))
         
-        # 訓練信息
-        train_status = "訓練中" if self.training_mode else "演示模式"
-        train_color = (0, 255, 0) if self.training_mode else (255, 255, 0)
-        train_text = self.font.render(train_status, True, train_color)
-        screen.blit(train_text, (ui_panel_x + ui_width // 2 - train_text.get_width() // 2, center_y + 60))
-        
-        # 3D模式信息
-        mode_status = "3D模式" if is_3d_mode else "2D模式"
-        mode_color = (100, 200, 255) if is_3d_mode else (200, 200, 200)
-        mode_text = self.font.render(mode_status, True, mode_color)
-        screen.blit(mode_text, (ui_panel_x + ui_width // 2 - mode_text.get_width() // 2, center_y + 85))
+        # 勝利統計
+        wins_text = self.small_font.render(
+            f"勝利: AI1 {self.game_stats['wins'][0]} - AI2 {self.game_stats['wins'][1]}",
+            True, TEXT_COLOR
+        )
+        screen.blit(wins_text, (ui_panel_x + ui_width // 2 - wins_text.get_width() // 2, center_y + 58))
 
         # 控制面板（動態計算位置）
-        controls_y = center_y + center_panel_height + 10
-        controls_height = min(160, int(WINDOW_HEIGHT * 0.2))
+        controls_y = center_y + center_panel_height + 15  # 增加間距
+        
+        # 計算按鈕所需高度
+        button_height = max(28, min(36, int(WINDOW_HEIGHT * 0.04)))
+        button_spacing = button_height + 6
+        total_buttons = 5
+        buttons_total_height = 10 + (button_height * total_buttons) + (button_spacing * (total_buttons - 1)) + 10
+        
+        controls_height = min(buttons_total_height, int(WINDOW_HEIGHT * 0.28))  # 確保能容納所有按鈕
         controls_bg = pygame.Surface((ui_width, controls_height), pygame.SRCALPHA)
         controls_bg.fill(UI_BACKGROUND)
         screen.blit(controls_bg, (ui_panel_x, controls_y))
@@ -1881,71 +1899,79 @@ class Game:
 
         # 按鈕（動態計算尺寸和位置）
         button_width = ui_width - 20
-        button_height = max(25, min(35, int(WINDOW_HEIGHT * 0.04)))
         button_y = controls_y + 10
-        button_spacing = button_height + 5
         
-        # 3D切換按鈕
-        self.buttons["3d_toggle"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y, button_width, button_height)
-        button_color = BUTTON_HOVER if self.buttons["3d_toggle"]["hover"] else BUTTON_COLOR
-        pygame.draw.rect(screen, button_color, self.buttons["3d_toggle"]["rect"], border_radius=5)
-        pygame.draw.rect(screen, UI_BORDER, self.buttons["3d_toggle"]["rect"], 2, border_radius=5)
-        button_text = self.small_font.render("切換3D模式", True, TEXT_COLOR)
+        # 加速模式按鈕（放在最上面，使用醒目顏色）
+        self.buttons["speed_boost"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y, button_width, button_height)
+        if self.speed_boost:
+            button_color = (255, 200, 50) if self.buttons["speed_boost"]["hover"] else (230, 180, 40)
+        else:
+            button_color = BUTTON_HOVER if self.buttons["speed_boost"]["hover"] else BUTTON_COLOR
+        pygame.draw.rect(screen, button_color, self.buttons["speed_boost"]["rect"], border_radius=5)
+        pygame.draw.rect(screen, UI_BORDER, self.buttons["speed_boost"]["rect"], 2, border_radius=5)
+        button_text = self.small_font.render("⚡ 加速模式 (3x)" if self.speed_boost else "加速模式", True, TEXT_COLOR)
         screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + (button_height - button_text.get_height()) // 2))
 
-        # 訓練模式切換按鈕
-        self.buttons["train_toggle"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + button_spacing, button_width, button_height)
-        button_color = BUTTON_HOVER if self.buttons["train_toggle"]["hover"] else BUTTON_COLOR
-        pygame.draw.rect(screen, button_color, self.buttons["train_toggle"]["rect"], border_radius=5)
-        pygame.draw.rect(screen, UI_BORDER, self.buttons["train_toggle"]["rect"], 2, border_radius=5)
-        button_text = self.small_font.render("切換訓練模式", True, TEXT_COLOR)
+        # 3D切換按鈕
+        self.buttons["3d_toggle"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + button_spacing, button_width, button_height)
+        if is_3d_mode:
+            button_color = (100, 200, 255) if self.buttons["3d_toggle"]["hover"] else (80, 180, 230)
+        else:
+            button_color = BUTTON_HOVER if self.buttons["3d_toggle"]["hover"] else BUTTON_COLOR
+        pygame.draw.rect(screen, button_color, self.buttons["3d_toggle"]["rect"], border_radius=5)
+        pygame.draw.rect(screen, UI_BORDER, self.buttons["3d_toggle"]["rect"], 2, border_radius=5)
+        button_text = self.small_font.render("3D模式" if is_3d_mode else "2D模式", True, TEXT_COLOR)
         screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + button_spacing + (button_height - button_text.get_height()) // 2))
 
+        # 訓練模式切換按鈕
+        self.buttons["train_toggle"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + 2 * button_spacing, button_width, button_height)
+        if self.training_mode:
+            button_color = (0, 255, 0) if self.buttons["train_toggle"]["hover"] else (0, 200, 0)
+        else:
+            button_color = BUTTON_HOVER if self.buttons["train_toggle"]["hover"] else BUTTON_COLOR
+        pygame.draw.rect(screen, button_color, self.buttons["train_toggle"]["rect"], border_radius=5)
+        pygame.draw.rect(screen, UI_BORDER, self.buttons["train_toggle"]["rect"], 2, border_radius=5)
+        button_text = self.small_font.render("訓練中" if self.training_mode else "演示模式", True, TEXT_COLOR)
+        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 2 * button_spacing + (button_height - button_text.get_height()) // 2))
+
         # 重置按鈕
-        self.buttons["reset"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + 2 * button_spacing, button_width, button_height)
+        self.buttons["reset"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + 3 * button_spacing, button_width, button_height)
         button_color = BUTTON_HOVER if self.buttons["reset"]["hover"] else BUTTON_COLOR
         pygame.draw.rect(screen, button_color, self.buttons["reset"]["rect"], border_radius=5)
         pygame.draw.rect(screen, UI_BORDER, self.buttons["reset"]["rect"], 2, border_radius=5)
         button_text = self.small_font.render("重置回合", True, TEXT_COLOR)
-        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 2 * button_spacing + (button_height - button_text.get_height()) // 2))
+        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 3 * button_spacing + (button_height - button_text.get_height()) // 2))
 
         # 保存按鈕
-        self.buttons["save"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + 3 * button_spacing, button_width, button_height)
+        self.buttons["save"]["rect"] = pygame.Rect(ui_panel_x + 10, button_y + 4 * button_spacing, button_width, button_height)
         button_color = BUTTON_HOVER if self.buttons["save"]["hover"] else BUTTON_COLOR
         pygame.draw.rect(screen, button_color, self.buttons["save"]["rect"], border_radius=5)
         pygame.draw.rect(screen, UI_BORDER, self.buttons["save"]["rect"], 2, border_radius=5)
         button_text = self.small_font.render("保存模型", True, TEXT_COLOR)
-        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 3 * button_spacing + (button_height - button_text.get_height()) // 2))
+        screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 4 * button_spacing + (button_height - button_text.get_height()) // 2))
 
         # 學習曲線圖 - 放在控制面板下方（動態計算位置和尺寸）
-        graph_y = controls_y + controls_height + 10
-        graph_height = max(100, min(150, int(WINDOW_HEIGHT * 0.15)))
-        if graph_y + graph_height + 100 < WINDOW_HEIGHT:  # 確保有足夠空間
+        graph_y = controls_y + controls_height + 15  # 增加間距
+        graph_height = max(120, min(180, int(WINDOW_HEIGHT * 0.2)))
+        available_height = WINDOW_HEIGHT - graph_y - 180  # 為底部預留空間
+        if available_height > 120:  # 確保有足夠空間
+            graph_height = min(graph_height, available_height)
             self.draw_learning_graph(screen, ui_panel_x, graph_y, ui_width, graph_height)
 
-        # 控制提示 - 放在底部（動態計算位置）
-        controls_text_y = WINDOW_HEIGHT - 140
-        if controls_text_y > graph_y + graph_height + 10:
+        # 控制提示 - 放在底部（動態計算位置，使用緊湊布局）
+        controls_text_y = WINDOW_HEIGHT - 155
+        if controls_text_y > graph_y + graph_height + 15:  # 增加間距
             controls = [
-                "ESC: 退出遊戲",
-                "空格: 暫停/繼續",
-                "R: 重置回合",
-                "T: 切換訓練模式",
-                "S: 保存模型",
-                "D: 切換3D模式"
+                "快捷鍵:",
+                "ESC: 退出  空格: 暫停",
+                "R: 重置  S: 保存",
+                "T: 訓練  D: 3D",
+                "F: 加速(3x)"
             ]
 
             for i, control in enumerate(controls):
-                control_text = self.small_font.render(control, True, TEXT_COLOR)
-                screen.blit(control_text, (ui_panel_x + 10, controls_text_y + i * 20))
-
-        # 勝利統計 - 放在控制提示上方
-        wins_y = max(graph_y + graph_height + 20, WINDOW_HEIGHT - 160)
-        wins_text = self.small_font.render(
-            f"勝利: AI1 {self.game_stats['wins'][0]} - AI2 {self.game_stats['wins'][1]}",
-            True, TEXT_COLOR
-        )
-        screen.blit(wins_text, (ui_panel_x + ui_width // 2 - wins_text.get_width() // 2, wins_y))
+                control_text = self.small_font.render(control, True, TEXT_COLOR if i > 0 else HIGHLIGHT_COLOR)
+                screen.blit(control_text, (ui_panel_x + 10, controls_text_y + i * 22))
 
     def reset_episode(self):
         # 重置蛇（初始長度：頭部 + 1 身體）
@@ -1962,7 +1988,7 @@ class Game:
     # 添加缺失的 run 方法
     def run(self):
         print("深度學習AI貪吃蛇對戰開始!")
-        print("按 ESC 退出, R 重置, 空格 暫停, T 切換訓練模式, S 保存模型, D 切換3D模式")
+        print("按 ESC 退出, R 重置, 空格 暫停, T 切換訓練模式, S 保存模型, D 切換3D模式, F 加速模式(3x)")
 
         while self.running:
             self.handle_events()
@@ -1971,7 +1997,9 @@ class Game:
                 self.update()
 
             self.draw()
-            clock.tick(FPS)
+            # 根據加速模式調整FPS
+            current_fps = FPS * 3 if self.speed_boost else FPS
+            clock.tick(current_fps)
 
         # 退出前保存
         self.save_models()
