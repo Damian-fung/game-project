@@ -89,16 +89,134 @@ class ReplayMemory:
     def __len__(self):
         return len(self.memory)
 
+class SumTree:
+    """用於高效優先級採樣的Sum Tree數據結構"""
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.tree = np.zeros(2 * capacity - 1)  # 存儲優先級
+        self.data = np.zeros(capacity, dtype=object)  # 存儲經驗
+        self.write = 0
+        self.n_entries = 0
+    
+    def _propagate(self, idx, change):
+        """向上傳播優先級變化"""
+        parent = (idx - 1) // 2
+        self.tree[parent] += change
+        if parent != 0:
+            self._propagate(parent, change)
+    
+    def _retrieve(self, idx, s):
+        """根據優先級採樣"""
+        left = 2 * idx + 1
+        right = left + 1
+        
+        if left >= len(self.tree):
+            return idx
+        
+        if s <= self.tree[left]:
+            return self._retrieve(left, s)
+        else:
+            return self._retrieve(right, s - self.tree[left])
+    
+    def total(self):
+        """返回所有優先級的總和"""
+        return self.tree[0]
+    
+    def add(self, priority, data):
+        """添加新經驗"""
+        idx = self.write + self.capacity - 1
+        
+        self.data[self.write] = data
+        self.update(idx, priority)
+        
+        self.write = (self.write + 1) % self.capacity
+        if self.n_entries < self.capacity:
+            self.n_entries += 1
+    
+    def update(self, idx, priority):
+        """更新優先級"""
+        change = priority - self.tree[idx]
+        self.tree[idx] = priority
+        self._propagate(idx, change)
+    
+    def get(self, s):
+        """根據優先級獲取經驗"""
+        idx = self._retrieve(0, s)
+        data_idx = idx - self.capacity + 1
+        return (idx, self.tree[idx], self.data[data_idx])
+
+class PrioritizedReplayMemory:
+    """優先經驗回放（Prioritized Experience Replay）"""
+    def __init__(self, capacity, alpha=0.6, beta=0.4, beta_increment=0.001):
+        self.tree = SumTree(capacity)
+        self.capacity = capacity
+        self.alpha = alpha  # 優先級指數（0=均勻採樣，1=完全按優先級）
+        self.beta = beta  # 重要性採樣權重（0=無糾正，1=完全糾正）
+        self.beta_increment = beta_increment
+        self.epsilon = 0.01  # 小常數，避免優先級為0
+        self.max_priority = 1.0
+    
+    def push(self, state, action, next_state, reward, done):
+        """添加經驗（使用最大優先級初始化）"""
+        data = (state, action, next_state, reward, done)
+        priority = self.max_priority ** self.alpha
+        self.tree.add(priority, data)
+    
+    def sample(self, batch_size):
+        """優先級採樣並返回重要性採樣權重"""
+        batch = []
+        indices = []
+        priorities = []
+        segment = self.tree.total() / batch_size
+        
+        # Beta逐漸增加到1（完全糾正偏差）
+        self.beta = min(1.0, self.beta + self.beta_increment)
+        
+        for i in range(batch_size):
+            a = segment * i
+            b = segment * (i + 1)
+            s = np.random.uniform(a, b)
+            
+            idx, priority, data = self.tree.get(s)
+            if data != 0:
+                batch.append(data)
+                indices.append(idx)
+                priorities.append(priority)
+        
+        # 計算重要性採樣權重
+        sampling_probabilities = np.array(priorities) / self.tree.total()
+        is_weights = np.power(self.tree.n_entries * sampling_probabilities, -self.beta)
+        is_weights /= is_weights.max()  # 歸一化
+        
+        return batch, indices, is_weights
+    
+    def update_priorities(self, indices, td_errors):
+        """根據TD誤差更新優先級"""
+        for idx, td_error in zip(indices, td_errors):
+            priority = (abs(td_error) + self.epsilon) ** self.alpha
+            self.tree.update(idx, priority)
+            self.max_priority = max(self.max_priority, priority)
+    
+    def __len__(self):
+        return self.tree.n_entries
+
 class DQNAgent:
     def __init__(self, input_size, output_size, model_path=None, 
                  learning_rate=0.001, epsilon_start=1.0, epsilon_min=0.01, 
-                 epsilon_decay=0.995, exploration_strategy='epsilon_greedy'):
+                 epsilon_decay=0.995, exploration_strategy='epsilon_greedy',
+                 use_per=False):  # 新增參數：是否使用優先經驗回放
         self.input_size = input_size
         self.output_size = output_size
         self.model = DQN(input_size, output_size)
         self.target_model = DQN(input_size, output_size)
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.memory = ReplayMemory(10000)
+        
+        # 選擇使用PER或普通記憶體
+        self.use_per = use_per
+        if use_per:
+            self.memory = PrioritizedReplayMemory(10000)
+        else:
+            self.memory = ReplayMemory(10000)
         self.batch_size = 32
         self.gamma = 0.95
         self.epsilon = epsilon_start
@@ -226,24 +344,51 @@ class DQNAgent:
         self.memory.push(state, action, next_state, reward, done)
     
     def replay(self):
-        """從記憶中學習"""
+        """從記憶中學習（支持PER）"""
         if len(self.memory) < self.batch_size:
             return
         
-        batch = self.memory.sample(self.batch_size)
-        states, actions, next_states, rewards, done = zip(*batch)
-        
-        states = torch.FloatTensor(states)
-        actions = torch.LongTensor(actions)
-        next_states = torch.FloatTensor(next_states)
-        rewards = torch.FloatTensor(rewards)
-        done = torch.BoolTensor(done)
-        
-        current_q_values = self.model(states).gather(1, actions.unsqueeze(1))
-        next_q_values = self.target_model(next_states).max(1)[0].detach()
-        target_q_values = rewards + (self.gamma * next_q_values * ~done)
-        
-        loss = F.mse_loss(current_q_values.squeeze(), target_q_values)
+        if self.use_per:
+            # 使用優先經驗回放
+            batch, indices, is_weights = self.memory.sample(self.batch_size)
+            states, actions, next_states, rewards, done = zip(*batch)
+            
+            states = torch.FloatTensor(states)
+            actions = torch.LongTensor(actions)
+            next_states = torch.FloatTensor(next_states)
+            rewards = torch.FloatTensor(rewards)
+            done = torch.BoolTensor(done)
+            is_weights = torch.FloatTensor(is_weights)
+            
+            current_q_values = self.model(states).gather(1, actions.unsqueeze(1))
+            next_q_values = self.target_model(next_states).max(1)[0].detach()
+            target_q_values = rewards + (self.gamma * next_q_values * ~done)
+            
+            # 計算TD誤差
+            td_errors = (target_q_values - current_q_values.squeeze()).detach().numpy()
+            
+            # 使用重要性採樣權重計算損失
+            loss = (is_weights * F.mse_loss(current_q_values.squeeze(), target_q_values, reduction='none')).mean()
+            
+            # 更新優先級
+            self.memory.update_priorities(indices, td_errors)
+            
+        else:
+            # 使用普通經驗回放
+            batch = self.memory.sample(self.batch_size)
+            states, actions, next_states, rewards, done = zip(*batch)
+            
+            states = torch.FloatTensor(states)
+            actions = torch.LongTensor(actions)
+            next_states = torch.FloatTensor(next_states)
+            rewards = torch.FloatTensor(rewards)
+            done = torch.BoolTensor(done)
+            
+            current_q_values = self.model(states).gather(1, actions.unsqueeze(1))
+            next_q_values = self.target_model(next_states).max(1)[0].detach()
+            target_q_values = rewards + (self.gamma * next_q_values * ~done)
+            
+            loss = F.mse_loss(current_q_values.squeeze(), target_q_values)
         
         # 記錄損失值
         self.last_loss = loss.item()
@@ -915,23 +1060,25 @@ class Game:
             os.makedirs(self.model_dir)
         
         # 加載或創建AI代理
-        # 蛇1: 激進型 - 快速衰減的 ε-greedy
+        # 蛇1: 激進型 - 快速衰減的 ε-greedy + PER
         self.ai1 = DQNAgent(self.input_size, self.output_size, 
                            os.path.join(self.model_dir, "snake1_model.pth"),
                            learning_rate=0.001,
                            epsilon_start=1.0,
                            epsilon_min=0.01,
                            epsilon_decay=0.995,
-                           exploration_strategy='epsilon_greedy')
+                           exploration_strategy='epsilon_greedy',
+                           use_per=True)  # 啟用優先經驗回放
         
-        # 蛇2: 穩健型 - 慢速衰減 + Boltzmann 探索
+        # 蛇2: 穩健型 - 慢速衰減 + Boltzmann 探索 + PER
         self.ai2 = DQNAgent(self.input_size, self.output_size, 
                            os.path.join(self.model_dir, "snake2_model.pth"),
                            learning_rate=0.0008,
                            epsilon_start=0.8,
                            epsilon_min=0.05,
                            epsilon_decay=0.998,
-                           exploration_strategy='boltzmann')
+                           exploration_strategy='boltzmann',
+                           use_per=True)  # 啟用優先經驗回放
         
         # 訓練模式
         self.training_mode = training_mode
