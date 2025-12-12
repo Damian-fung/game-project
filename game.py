@@ -526,6 +526,7 @@ class Snake:
                 self.draw_2d_segment(surface, x, y, i == 0, i)
     
     def draw_2d_segment(self, surface, x, y, is_head, segment_index):
+        global CELL_SIZE
         rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
         
         # 獲取當前節段的漸變顏色
@@ -553,6 +554,7 @@ class Snake:
             pygame.draw.rect(surface, (min(255, segment_color[0]+30), min(255, segment_color[1]+30), min(255, segment_color[2]+30)), inner_rect, border_radius=3)
 
     def draw_3d_segment(self, surface, x, y, is_head, segment_index):
+        global CELL_SIZE
         # 獲取當前節段的漸變顏色
         segment_color = self.get_segment_color(segment_index)
         
@@ -639,6 +641,7 @@ class Snake:
             self.draw_3d_decoration(surface, iso_x, iso_y)
 
     def draw_3d_eyes(self, surface, iso_x, iso_y):
+        global CELL_SIZE
         # 3D模式下的眼睛位置
         eye_radius = CELL_SIZE // 8
         center_x = iso_x + CELL_SIZE * 0.35
@@ -672,6 +675,7 @@ class Snake:
         pygame.draw.circle(surface, (255, 255, 255), (eye2_pos[0]-eye_radius//3, eye2_pos[1]-eye_radius//3), eye_radius//4)
 
     def draw_3d_mouth(self, surface, iso_x, iso_y):
+        global CELL_SIZE
         center_x = iso_x + CELL_SIZE * 0.35
         center_y = iso_y + CELL_SIZE * 0.2
         
@@ -735,6 +739,7 @@ class Snake:
             pygame.draw.polygon(surface, fin_color, fin_points)
 
     def draw_eyes(self, surface, x, y):
+        global CELL_SIZE
         center_x = x * CELL_SIZE + CELL_SIZE // 2
         center_y = y * CELL_SIZE + CELL_SIZE // 2
         eye_radius = CELL_SIZE // 6
@@ -767,6 +772,7 @@ class Snake:
         pygame.draw.circle(surface, (255, 255, 255), (eye2_pos[0]-eye_radius//3, eye2_pos[1]-eye_radius//3), eye_radius//4)
 
     def draw_mouth(self, surface, x, y):
+        global CELL_SIZE
         center_x = x * CELL_SIZE + CELL_SIZE // 2
         center_y = y * CELL_SIZE + CELL_SIZE // 2
         
@@ -809,6 +815,7 @@ class Food:
             self.draw_2d(surface, x, y)
     
     def draw_2d(self, surface, x, y):
+        global CELL_SIZE
         # 計算脈動效果
         pulse = math.sin(pygame.time.get_ticks() / 200 + self.animation_offset) * 0.1 + 0.9
         
@@ -843,6 +850,7 @@ class Food:
         pygame.draw.polygon(surface, (100, 200, 100), leaf_points)
     
     def draw_3d(self, surface, x, y):
+        global CELL_SIZE
         # 等角投影參數
         iso_scale = 0.7
         iso_x = (x - y) * (CELL_SIZE * iso_scale)
@@ -977,6 +985,7 @@ class AttackEffect:
             self.draw_2d(surface, x, y)
     
     def draw_2d(self, surface, x, y):
+        global CELL_SIZE
         center_x = x * CELL_SIZE + CELL_SIZE // 2
         center_y = y * CELL_SIZE + CELL_SIZE // 2
         
@@ -993,6 +1002,7 @@ class AttackEffect:
                 surface.blit(s, (pos_x - p['size'], pos_y - p['size']))
     
     def draw_3d(self, surface, x, y):
+        global CELL_SIZE
         # 等角投影參數
         iso_scale = 0.7
         iso_x = (x - y) * (CELL_SIZE * iso_scale)
@@ -1214,6 +1224,7 @@ class Game:
         ]
 
     def draw_3d_environment(self, surface):
+        global CELL_SIZE
         # 繪製3D地板
         for x, y in self.floor_tiles:
             iso_scale = 0.7
@@ -1394,7 +1405,7 @@ class Game:
         
         # 吃到食物的獎勵
         if snake.body[0] == self.food.position:
-            reward += 10
+            reward += 20
         
         # 攻擊成功的獎勵（讓對方縮短）
         head = snake.body[0]
@@ -1740,6 +1751,7 @@ class Game:
         surface.blit(legend2_text, (x + 115, legend_y - 8))
 
     def draw(self):
+        global CELL_SIZE, GRID_WIDTH, GRID_HEIGHT
         # 繪製背景
         screen.fill(BACKGROUND)
 
@@ -1768,6 +1780,7 @@ class Game:
         pygame.display.flip()
 
     def draw_ui(self):
+        global CELL_SIZE, GRID_WIDTH, UI_PANEL_WIDTH, WINDOW_HEIGHT
         # 計算UI面板位置（確保不與遊戲區域重疊）
         ui_panel_x = GRID_WIDTH * CELL_SIZE + 10  # 添加10像素間隔
         
