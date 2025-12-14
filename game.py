@@ -1103,6 +1103,7 @@ class Game:
         self.game_stats = {
             "episode": 0,
             "wins": [0, 0],  # [蛇1勝利次數, 蛇2勝利次數]
+            "draws": 0,  # 平手次數
             "total_food": 0,
             "training_episodes": 0,
             "total_rewards": [0.0, 0.0],  # 每回合累積獎勵
@@ -1595,8 +1596,9 @@ class Game:
         if prev_alive[1] and not now_alive[1] and now_alive[0]:
             self.game_stats["wins"][0] += 1
 
-        # 如果兩條蛇都死了，視為回合結束（不計勝場），重新開始
+        # 如果兩條蛇都死了，視為回合結束（計入平手），重新開始
         if not self.snake1.alive and not self.snake2.alive:
+            self.game_stats["draws"] += 1
             self.end_episode("平手")
             return
 
@@ -1811,9 +1813,13 @@ class Game:
         title_text = self.title_font.render("深度學習AI貪吃蛇大戰", True, HIGHLIGHT_COLOR)
         screen.blit(title_text, (ui_panel_x + ui_width // 2 - title_text.get_width() // 2, 10))
 
-        # AI狀態面板（根據窗口高度動態調整間距）
-        ai_panel_height = min(120, int(WINDOW_HEIGHT * 0.15))
-        ai_panel_spacing = 15  # AI面板之間的間距
+        # 計算底部學習曲線圖的保留空間
+        graph_reserved_height = 210  # 學習曲線圖 + 邊距
+        available_ui_height = WINDOW_HEIGHT - 50 - graph_reserved_height  # 標題後到學習曲線圖之間的可用高度
+        
+        # AI狀態面板（根據可用高度動態調整）
+        ai_panel_height = min(110, int(available_ui_height * 0.22))
+        ai_panel_spacing = 12  # AI面板之間的間距
         for i, snake in enumerate([self.snake1, self.snake2]):
             y_pos = 50 + i * (ai_panel_height + ai_panel_spacing)
 
@@ -1859,9 +1865,9 @@ class Game:
             avg_text = self.small_font.render(f"平均: {avg_reward:.3f}", True, (150, 200, 255))
             screen.blit(avg_text, (ui_panel_x + 10, y_pos + 92))
 
-        # 中央信息面板（動態計算位置）
-        center_y = 50 + 2 * (ai_panel_height + ai_panel_spacing) + 15  # 增加間距
-        center_panel_height = min(80, int(WINDOW_HEIGHT * 0.1))  # 縮小面板高度
+        # 中央信息面板（動態計算位置，擴大高度以容納更多資訊）
+        center_y = 50 + 2 * (ai_panel_height + ai_panel_spacing) + 10
+        center_panel_height = min(100, int(available_ui_height * 0.16))
         center_bg = pygame.Surface((ui_width, center_panel_height), pygame.SRCALPHA)
         center_bg.fill((40, 45, 60, 200))
         screen.blit(center_bg, (ui_panel_x, center_y))
@@ -1869,29 +1875,36 @@ class Game:
 
         # 回合信息
         episode_text = self.font.render(f"回合: {self.game_stats['episode']}", True, TEXT_COLOR)
-        screen.blit(episode_text, (ui_panel_x + ui_width // 2 - episode_text.get_width() // 2, center_y + 8))
+        screen.blit(episode_text, (ui_panel_x + ui_width // 2 - episode_text.get_width() // 2, center_y + 6))
         
         # 步數信息
         steps_text = self.small_font.render(f"步數: {self.game_stats['episode_steps']}", True, TEXT_COLOR)
-        screen.blit(steps_text, (ui_panel_x + ui_width // 2 - steps_text.get_width() // 2, center_y + 35))
+        screen.blit(steps_text, (ui_panel_x + ui_width // 2 - steps_text.get_width() // 2, center_y + 30))
         
-        # 勝利統計
-        wins_text = self.small_font.render(
-            f"勝利: AI1 {self.game_stats['wins'][0]} - AI2 {self.game_stats['wins'][1]}",
-            True, TEXT_COLOR
+        # 勝利統計（字體加大）
+        wins_text = self.font.render(
+            f"AI1 {self.game_stats['wins'][0]} - {self.game_stats['wins'][1]} AI2",
+            True, HIGHLIGHT_COLOR
         )
-        screen.blit(wins_text, (ui_panel_x + ui_width // 2 - wins_text.get_width() // 2, center_y + 58))
+        screen.blit(wins_text, (ui_panel_x + ui_width // 2 - wins_text.get_width() // 2, center_y + 52))
+        
+        # 平手統計
+        draws_text = self.small_font.render(f"平手: {self.game_stats['draws']}", True, (200, 200, 100))
+        screen.blit(draws_text, (ui_panel_x + ui_width // 2 - draws_text.get_width() // 2, center_y + 76))
 
-        # 控制面板（動態計算位置）
+        # 控制面板（往下移動一些，優化邊框對齊）
         controls_y = center_y + center_panel_height + 15  # 增加間距
         
         # 計算按鈕所需高度
-        button_height = max(28, min(36, int(WINDOW_HEIGHT * 0.04)))
-        button_spacing = button_height + 6
+        button_height = max(26, min(32, int(available_ui_height * 0.05)))
+        button_spacing = button_height + 5
         total_buttons = 5
         buttons_total_height = 10 + (button_height * total_buttons) + (button_spacing * (total_buttons - 1)) + 10
         
-        controls_height = min(buttons_total_height, int(WINDOW_HEIGHT * 0.28))  # 確保能容納所有按鈕
+        # 計算到底部學習曲線圖的剩餘空間
+        remaining_space = WINDOW_HEIGHT - graph_reserved_height - controls_y
+        controls_height = max(150, min(buttons_total_height, remaining_space - 130))  # 最小150像素，為快捷鍵提示預留130像素
+        
         controls_bg = pygame.Surface((ui_width, controls_height), pygame.SRCALPHA)
         controls_bg.fill(UI_BACKGROUND)
         screen.blit(controls_bg, (ui_panel_x, controls_y))
@@ -1950,17 +1963,12 @@ class Game:
         button_text = self.small_font.render("保存模型", True, TEXT_COLOR)
         screen.blit(button_text, (ui_panel_x + 10 + (button_width - button_text.get_width()) // 2, button_y + 4 * button_spacing + (button_height - button_text.get_height()) // 2))
 
-        # 學習曲線圖 - 放在控制面板下方（動態計算位置和尺寸）
-        graph_y = controls_y + controls_height + 15  # 增加間距
-        graph_height = max(120, min(180, int(WINDOW_HEIGHT * 0.2)))
-        available_height = WINDOW_HEIGHT - graph_y - 180  # 為底部預留空間
-        if available_height > 120:  # 確保有足夠空間
-            graph_height = min(graph_height, available_height)
-            self.draw_learning_graph(screen, ui_panel_x, graph_y, ui_width, graph_height)
-
-        # 控制提示 - 放在底部（動態計算位置，使用緊湊布局）
-        controls_text_y = WINDOW_HEIGHT - 155
-        if controls_text_y > graph_y + graph_height + 15:  # 增加間距
+        # 控制提示 - 放在控制面板和學習曲線圖之間（動態計算，確保不重疊）
+        controls_text_y = controls_y + controls_height + 10
+        graph_start_y = WINDOW_HEIGHT - graph_reserved_height
+        
+        # 只有當有足夠空間時才顯示快捷鍵提示
+        if graph_start_y - controls_text_y > 100:
             controls = [
                 "快捷鍵:",
                 "ESC: 退出  空格: 暫停",
@@ -1971,7 +1979,12 @@ class Game:
 
             for i, control in enumerate(controls):
                 control_text = self.small_font.render(control, True, TEXT_COLOR if i > 0 else HIGHLIGHT_COLOR)
-                screen.blit(control_text, (ui_panel_x + 10, controls_text_y + i * 22))
+                screen.blit(control_text, (ui_panel_x + 10, controls_text_y + i * 20))
+        
+        # 學習曲線圖 - 固定在右下角（始終顯示，不會被其他元素覆蓋）
+        graph_y = WINDOW_HEIGHT - 200
+        graph_height = 195
+        self.draw_learning_graph(screen, ui_panel_x, graph_y, ui_width, graph_height)
 
     def reset_episode(self):
         # 重置蛇（初始長度：頭部 + 1 身體）
