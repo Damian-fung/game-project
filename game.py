@@ -1568,21 +1568,21 @@ class Game:
                     # 攻擊動畫：在被撞位置顯示
                     self.attack_effects.append(AttackEffect(segment, life_frames=12))
                     # 扣尾巴或死亡
-                    if len(self.snake2.body) > 1:
+                    if len(self.snake2.body) > 1:  # 長度>1就扣尾巴（可剩只有頭）
                         self.snake2.body.pop()
                         # 攻擊者加1分（可改）
                         self.snake1.score += 1
-                    else:
+                    else:  # 已經只剩頭(length=1)，再被攻擊就死亡
                         self.snake2.alive = False
 
             # 蛇2頭撞蛇1身
             for segment in self.snake1.body[1:]:
                 if head2 == segment and self.snake1.alive:
                     self.attack_effects.append(AttackEffect(segment, life_frames=12))
-                    if len(self.snake1.body) > 1:
+                    if len(self.snake1.body) > 1:  # 長度>1就扣尾巴（可剩只有頭）
                         self.snake1.body.pop()
                         self.snake2.score += 1
-                    else:
+                    else:  # 已經只剩頭(length=1)，再被攻擊就死亡
                         self.snake1.alive = False
 
         # 判定誰死亡（本次更新造成的死亡）並更新勝利統計
